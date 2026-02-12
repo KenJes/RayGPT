@@ -1,0 +1,37 @@
+# Dependencias para funcionalidades de audio en rAImundoGPT
+#
+# Instalación:
+#     pip install -r requirements_audio.txt
+#
+# Funcionalidades:
+# - Piper TTS: Síntesis de voz local y rápida
+# - OpenAI Whisper: Reconocimiento de voz
+# - Grabación y reproducción de audio
+
+# TTS (Text-to-Speech) con Piper
+piper-tts>=1.2.0
+
+# STT (Speech-to-Text) con Whisper
+openai-whisper>=20231117
+
+# Audio I/O
+sounddevice>=0.4.6
+soundfile>=0.12.1
+
+# Procesamiento de audio adicional (opcional)
+numpy>=1.24.0
+scipy>=1.11.0
+
+# FFmpeg para conversión de audio (necesario para Whisper)
+# Instalar FFmpeg manualmente:
+# Windows: choco install ffmpeg o descargar de https://ffmpeg.org/download.html
+# Linux: sudo apt install ffmpeg
+# macOS: brew install ffmpeg
+
+# Notas de instalación:
+# 1. Instala las dependencias con: pip install -r requirements_audio.txt
+# 2. Instala FFmpeg en tu sistema
+# 3. Descarga una voz en español de Piper desde:
+#    https://github.com/rhasspy/piper/releases/tag/v1.2.0
+#    Recomendada: es_ES-claude-medium.onnx
+#    Guárdala en: resources/data/audio/voices/

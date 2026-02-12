@@ -1,0 +1,24 @@
+# Dependencias para rAImundoGPT WhatsApp Server
+#
+# Instalación:
+#     pip install -r requirements_whatsapp.txt
+#
+# O individual:
+#     pip install flask flask-cors
+
+flask>=3.0.0
+flask-cors>=4.0.0
+
+# Dependencias ya existentes de Raymundo
+# (ya deberían estar instaladas):
+# - requests
+# - azure-ai-inference
+# - python-dotenv
+# - google-auth
+# - google-auth-oauthlib
+# - google-auth-httplib2
+# - google-api-python-client
+# - Pillow
+# - PyPDF2
+# - python-docx
+# - beautifulsoup4

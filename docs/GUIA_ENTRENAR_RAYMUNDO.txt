@@ -1,0 +1,79 @@
+Guía paso a paso para entrenar / mejorar Raymundo (RAG recomendado)
+
+1) Objetivo
+- Crear un pipeline reproducible para que Raymundo use recuperación de contexto (RAG) y mejore sus respuestas con datos propios.
+
+2) Requisitos previos
+- Sistema: Windows / Linux con Python 3.10+ (en repo se usa 3.14, asegúrate de usar la versión apropiada de tu entorno).
+- Entorno virtual: usa `.venv` o `venv`.
+- Paquetes básicos (ejecuta en la raíz del repo):
+  pip install -r requirements.txt
+  (si no existe, instala: sentence-transformers, faiss-cpu, numpy, requests, python-dotenv)
+
+3) Estructura de datos recomendada
+- Crea las carpetas si no existen:
+  - `data/docs/` : documentos y archivos (txt, md, pdf convertidos a txt) con conocimiento de la empresa.
+  - `data/intents.json` : archivo con la definición de intents y ejemplos.
+  - `data/logs/` : logs de conversaciones (anonymized) para crear ejemplos reales.
+
+4) Preparar dataset
+- Recolecta: FAQ, manuales, plantillas de presentación, scripts de ventas.
+- Normaliza: elimina PII, corrige codificación, divide en fragmentos de 200-600 tokens.
+- Etiqueta: asigna `intent` y campo `source` (faq/manual/email).
+
+5) Crear `data/intents.json` (ejemplo mínimo)
+{
+  "crear_presentacion": {
+    "examples": [
+      "Crea una presentación sobre marketing digital",
+      "Prepara slides para reunión de ventas"
+    ],
+    "parameters": ["tema","num_diapos","incluir_imagenes"]
+  }
+}
+
+6) Generar embeddings y construir índice FAISS
+- Script sugerido: `scripts/build_embeddings.py`
+- Flujo básico:
+  - Cargar fragmentos del `data/docs/` y normalizar texto
+  - Crear embeddings con tu modelo elegido (ej. `sentence-transformers/all-MiniLM-L6-v2` o embeddings de OpenAI si tienes key)
+  - Guardar matriz de vectores y metadatos (id → source, text)
+  - Indexar en FAISS (IndexFlatL2 o IVF si es grande)
+
+7) Runtime: consulta + prompt
+- Al recibir un mensaje:
+  1. Generar embedding del mensaje (misma función que en build)
+  2. Buscar top-K en FAISS (k=3..5)
+  3. Construir prompt: system prompt + doc snippets + user message
+  4. Llamar al LLM (llave en `.env`) y devolver respuesta
+
+8) Feedback loop (entrenamiento continuo)
+- Guardar cada interacción: user_message, retrieved_docs, model_response, human_review (si aplica)
+- Periódicamente (p. ej. semanal) reindexa con nuevos docs o añade ejemplos etiquetados para fine-tune si decides hacerlo.
+
+9) Opciones avanzadas
+- Fine-tuning: usar solo si tienes muchos pares (input→desired output). Considera coste y complejidad.
+- Hybrid: RAG para contexto + tiny fine-tune para el 'tono' del asistente.
+
+10) Scripts/commands útiles
+- Crear venv e instalar:
+  python -m venv .venv
+  .\\.venv\\Scripts\\Activate.ps1    (Windows PowerShell)
+  pip install -r requirements.txt
+- Construir embeddings (ejemplo):
+  .\\.venv\\Scripts\\python.exe scripts\\build_embeddings.py
+- Ejecutar servidor Flask local:
+  .\\.venv\\Scripts\\python.exe whatsapp_server.py
+
+11) Métricas a medir
+- Tasa de resolución automática
+- Precisión por intent
+- Tiempo de respuesta
+- Ratio de falsos positivos (respuestas fuera de contexto)
+
+12) Buenas prácticas
+- Versiona `data/` y `scripts/` en Git, pero NO subas llaves ni datos PII.
+- Mantén un `data/dump/` con snapshots y usa branching para cambios mayores.
+
+---
+Archivo de referencia: crea `scripts/build_embeddings.py` y `data/intents.json` con plantillas antes de correr el pipeline.

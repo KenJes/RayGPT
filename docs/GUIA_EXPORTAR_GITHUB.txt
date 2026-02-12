@@ -1,0 +1,80 @@
+Guía: exportar Raymundo a GitHub y permitir que otros usen sus propias API keys sin comprometer tu seguridad
+
+1) Objetivo
+- Preparar el repositorio para compartir código y permitir que otros ejecuten el proyecto localmente añadiendo sus propias keys sin que se publiquen secretos.
+
+2) Archivos clave que NO subir
+- `.env` (variables de entorno con API keys)
+- `data/logs/*` que contenga PII o conversaciones reales
+- cualquier archivo `.pem`, `.key` o credenciales privadas
+
+3) Plantilla de variables de entorno
+- Crea un archivo `env.template` con las variables necesarias (sin valores):
+  RAYMUNDO_OPENAI_KEY=
+  RAYMUNDO_GROQ_KEY=
+  GOOGLE_APPLICATION_CREDENTIALS=
+  WHATSAPP_BSP_TOKEN=
+
+- Instruye a colaboradores a copiar y renombrar:
+  cp env.template .env
+  (Windows PowerShell)
+  copy env.template .env
+
+4) `.gitignore` recomendado (añade estas líneas)
+.env
+data/logs/
+data/dump/
+*.pyc
+__pycache__/
+.venv/
+node_modules/
+
+5) Documentación mínima para el repo (README)
+- Indica pasos claros: crear venv, instalar dependencias, copiar `env.template` a `.env`, añadir llaves, ejecutar servidor.
+- Ejemplo rápido:
+  python -m venv .venv
+  .\\.venv\\Scripts\\Activate.ps1
+  pip install -r requirements.txt
+  copy env.template .env
+  Edita `.env` y añade tus keys
+  .\\.venv\\Scripts\\python.exe whatsapp_server.py
+
+6) Uso de GitHub Actions (opcional) — manejar secretos
+- No pongas secretos en workflows. En GitHub repo → Settings → Secrets & variables → Actions, define secretos (p.ej. `RAYMUNDO_OPENAI_KEY`).
+- En workflows usa `secrets.RAYMUNDO_OPENAI_KEY` para ejecutar pruebas o deploys sin exponer valores.
+
+7) Compartir datos y reproducibilidad
+- Para datasets que quieras compartir, crea una versión anonimizadas en `data/public/` y documenta el proceso de anonimización.
+- Si los datos no pueden ser compartidos, documenta cómo los colaboradores deben preparar sus propios datos locales.
+
+8) Scripts de inicialización para terceros
+- Añade `scripts/setup_local.sh` y `scripts\setup_local.ps1` que:
+  - creen venv
+  - instalen dependencias
+  - copien `env.template` a `.env` si no existe
+  - indiquen al usuario dónde añadir keys
+
+9) Ejemplo de `env.template` (contenido)
+RAYMUNDO_OPENAI_KEY=
+RAYMUNDO_GROQ_KEY=
+GOOGLE_APPLICATION_CREDENTIALS=path/to/google-credentials.json
+WHATSAPP_BSP_TOKEN=
+
+10) Seguridad y recomendaciones operativas
+- Nunca pongas `GOOGLE_APPLICATION_CREDENTIALS` con credenciales en el repo; sube el JSON solo a un secreto seguro o indícale al usuario que lo guarde localmente y ponga la ruta en `.env`.
+- Usa permisos mínimos en cuentas/keys y rotación periódica.
+
+11) Cómo dar instrucciones a colaboradores en `CONTRIBUTING.md`
+- Añade pasos para:
+  1) Clonar
+  2) Copiar `env.template` a `.env`
+  3) Configurar proveedor (Google, OpenAI, Groq)
+  4) No subir secretos y abrir PRs con cambios de código solo
+
+12) Checklist antes de publicar repo
+- Asegúrate que `.env` está en `.gitignore`.
+- Ejecuta `git status --ignored` para validar archivos ignorados.
+- Busca accidentalmente commits con llaves: `git log -S 'sk-' --source` o revisa `git` history con `git grep`.
+
+---
+Con este esquema, otros pueden clonar el repositorio, crear su `.env` con sus propias claves y ejecutar Raymundo localmente sin acceder a tus credenciales.

@@ -1,0 +1,31 @@
+{
+  "name": "raimundogpt-whatsapp-bot",
+  "version": "2.0.0",
+  "description": "Bot de WhatsApp para rAImundoGPT con personalidad puteado",
+  "main": "whatsapp_bot.js",
+  "scripts": {
+    "start": "node whatsapp_bot.js",
+    "dev": "nodemon whatsapp_bot.js"
+  },
+  "keywords": [
+    "whatsapp",
+    "bot",
+    "ai",
+    "raymundo",
+    "chatbot"
+  ],
+  "author": "rAImundoGPT Team",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^1.6.7",
+    "form-data": "^4.0.0",
+    "qrcode-terminal": "^0.12.0",
+    "whatsapp-web.js": "^1.25.0"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.3"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}
