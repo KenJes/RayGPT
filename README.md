@@ -1,9 +1,5 @@
 #  Raymundo - Asistente IA Personal
 
-![Version](https://img.shields.io/badge/version-2.0-blue)
-![Python](https://img.shields.io/badge/python-3.9+-green)
-![License](https://img.shields.io/badge/license-MIT-orange)
-
 **Raymundo** es un asistente de inteligencia artificial versátil que combina múltiples modelos de IA para ofrecerte una experiencia completa de productividad y automatización.
 
 ---
