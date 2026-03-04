@@ -12,7 +12,8 @@ SCOPES = [
     'https://www.googleapis.com/auth/presentations',
     'https://www.googleapis.com/auth/documents',
     'https://www.googleapis.com/auth/spreadsheets',
-    'https://www.googleapis.com/auth/drive.file'
+    'https://www.googleapis.com/auth/drive.file',
+    'https://www.googleapis.com/auth/drive',
 ]
 
 def main():
@@ -22,8 +23,10 @@ def main():
     print()
     
     creds = None
-    token_file = 'token.json'
-    oauth_file = 'oauth-credentials.json'
+    # Rutas en resources/data/
+    data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data')
+    token_file = os.path.join(data_dir, 'token.json')
+    oauth_file = os.path.join(data_dir, 'oauth-credentials.json')
     
     # Verificar si ya existe el token
     if os.path.exists(token_file):

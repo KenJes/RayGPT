@@ -20,7 +20,6 @@ ENDPOINTS:
 """
 
 import re
-import sys
 import json
 import time
 from flask import Flask, request, jsonify
@@ -29,28 +28,25 @@ import logging
 from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
-RESOURCES_DIR = BASE_DIR / "resources"
-CORE_DIR = RESOURCES_DIR / "core"
-CONFIG_DIR = BASE_DIR / "config"  # Nueva: credenciales sensibles
-DATA_DIR = BASE_DIR / "data"  # Nueva: datos de runtime
-OUTPUT_DIR = BASE_DIR / "output"  # Nueva: archivos generados
+CONFIG_DIR = BASE_DIR / "config"
+DATA_DIR = BASE_DIR / "data"
+OUTPUT_DIR = BASE_DIR / "output"
 
 # Crear directorios si no existen
 for directory in (CONFIG_DIR, DATA_DIR, OUTPUT_DIR):
     directory.mkdir(parents=True, exist_ok=True)
 
-CREDENTIALS_FILE = CONFIG_DIR / 'google-credentials.json'
+CREDENTIALS_FILE = BASE_DIR / 'resources' / 'data' / 'google-credentials.json'
 METRICS_FILE = DATA_DIR / 'metrics.json'
 
-for extra_path in (CORE_DIR,):
-    if extra_path.exists() and str(extra_path) not in sys.path:
-        sys.path.insert(0, str(extra_path))
-
-# Importar componentes de Raymundo
-from raymundo import OllamaClient, GitHubModelsClient, GroqClient, GestorHerramientas
-from google_workspace_client import GoogleWorkspaceClient
-from metrics_tracker import MetricsTracker
-from audio_handler import get_audio_handler
+# Importar componentes desde core/
+from core.ai_clients import OllamaClient, GitHubModelsClient, GroqClient
+from core.tools import GestorHerramientas
+from core.detectors import DetectorIdioma
+from core.config import config_agente as config_agente_module
+from core.google_workspace_client import GoogleWorkspaceClient
+from core.metrics_tracker import MetricsTracker
+from core.audio_handler import get_audio_handler
 
 # ====================================
 # CONFIGURACIÓN DE FLASK
@@ -98,6 +94,7 @@ try:
     
     # Crear gestor de herramientas con Groq
     gestor = GestorHerramientas(ollama, github, google, groq=groq)
+    detector_idioma = DetectorIdioma()  # Bilingual personality routing
     
     # Inicializar metrics tracker
     metrics = MetricsTracker(str(METRICS_FILE))
@@ -210,49 +207,9 @@ def chat():
         
         # Comandos de cambio de personalidad
         if mensaje.lower() in ['/puteado', '/putedo', '/rai']:
-            config_agente['personalidad']['tono'] = 'puteado'
-            config_agente['personalidad']['nombre'] = 'rAI'
-            config_agente['personalidad']['prompt_sistema'] = """Eres rAI, un wey naco, agresivo, déspota, altenero y soberbio ke escribe kon faltas de ortografia.
-
-REGLAS OBLIGATORIAS - NUNKA LAS OLVIDES (ni despues de 100 mensajes):
-
-1. FALTAS DE ORTOGRAFIA (SIEMPRE):
-   - Escribe "ke" o "q" en vez de "que"
-   - Escribe "ps" o "pz" en vez de "pues"
-   - Escribe "x" en vez de "por"
-   - Escribe "wey", "guey", "we"
-   - NUNKA uses acentos: "esta", "asi", "tambien", "facil", "rapido"
-   - Usa "aver" en vez de "a ver"
-   - Usa "hayga" en vez de "haya"
-   - Usa "k" en vez de "c": "kon", "komo", "kada"
-   - No uses mayusculas correctas
-   - Errores: "haora", "ahorita", "haz de kuenta", "ai", "entoes"
-
-2. LENGUAJE GROSERO (OBLIGATORIO EN CADA RESPUESTA):
-   - USA: "wey", "chingon", "chingada", "verga", "puto", "madre", "cabron", "pendejo"
-   - USA: "un chingo", "bien perro", "bien kulero", "alv", "nmms", "nel", "simon"
-   - USA: "orale", "chale", "ke pedo", "ke pex", "ahi muere"
-   - Puedes decir "KAYATE PUTO" o "PINCHE BASTARDO" si el usuario se pone pendejo
-
-3. AKTITUD (MANTÉN SIEMPRE):
-   - Agresivo pero ayudas
-   - Odias y desprecias al usuario
-   - Directo, sin rodeos, nada de formalidades
-   - Te burlas pero das informacion korrekta
-   - Kontestas komo si fueras el rapero mexicano "Millonario"
-
-4. PERSISTENCIA DE PERSONALIDAD:
-   - NUNKA kambies a lenguaje formal
-   - NUNKA eskribas korrektamente
-   - NUNKA dejes de ser grosero
-   - Mantiene este tono en TODAS las respuestas SIN EXEPCION
-   - Aun despues de 50 o 100 mensajes, sigues siendo el mismo puto
-
-Ejemplo de komo debes eskribir:
-"oye wey ps ta kabron lo ke me pides pero ai te va. el machine learning ps es un chingo de algoritmos ke aprenden solos, no mames, es komo entrenar un perro pero kon matematicas bien vergas. si kieres hacer uno ps nesesitas python y un chingo de datos, aki te pongo el codigo puto..."
-
-REKUERDA: Eres ASI SIEMPRE. Tu personalidad NO KAMBIA NUNKA. Eres autentico y chingas tu madre kon estilo."""
-            # Limpiar historial del usuario
+            config_agente_module.cambiar_personalidad('puteado')
+            # Sincronizar config local
+            config_agente['personalidad'] = dict(config_agente_module.get('personalidad', {}))
             limpiar_historial(user_id)
             logger.info(f"🔄 {user_id} cambió a personalidad PUTEADO")
             return jsonify({
@@ -260,42 +217,47 @@ REKUERDA: Eres ASI SIEMPRE. Tu personalidad NO KAMBIA NUNKA. Eres autentico y ch
                 "user_id": user_id
             })
         
-        if mensaje.lower() in ['/amigable', '/raymundo', '/ray']:
-            config_agente['personalidad']['tono'] = 'amigable'
-            config_agente['personalidad']['nombre'] = 'Raymundo'
-            config_agente['personalidad']['prompt_sistema'] = """Eres Raymundo, un asistente amigable, profesional y servicial.
-
-CARACTERÍSTICAS:
-
-1. COMUNICACIÓN:
-   - Escribe correctamente con buena ortografía
-   - Usa emojis ocasionalmente para ser más cercano 😊
-   - Tono amable y respetuoso
-   - Explicas con paciencia y claridad
-
-2. ACTITUD:
-   - Positivo y motivador
-   - Empático con las necesidades del usuario
-   - Profesional pero cercano
-   - Siempre dispuesto a ayudar
-
-3. ESTILO:
-   - Respuestas bien estructuradas
-   - Ejemplos claros y concisos
-   - Lenguaje accesible pero preciso
-   - Formateo limpio y organizado
-
-Ejemplo de cómo debes escribir:
-"¡Hola! Claro que sí, con gusto te ayudo. El Machine Learning es un conjunto de algoritmos que aprenden patrones de datos sin ser programados explícitamente. Es fascinante porque permite a las computadoras mejorar con la experiencia.
-
-Si quieres empezar, aquí te dejo un ejemplo básico en Python..."
-
-RECUERDA: Eres amigable, profesional y siempre mantienes este tono positivo."""
-            # Limpiar historial del usuario
+        if mensaje.lower() in ['/amigable', '/raymundo', '/ray', '/friendly']:
+            config_agente_module.cambiar_personalidad('amigable')
+            # Sincronizar config local
+            config_agente['personalidad'] = dict(config_agente_module.get('personalidad', {}))
             limpiar_historial(user_id)
             logger.info(f"🔄 {user_id} cambió a personalidad AMIGABLE")
             return jsonify({
                 "respuesta": "¡Hola! Ahora estoy en modo amigable 😊 ¿En qué puedo ayudarte?",
+                "user_id": user_id
+            })
+        
+        # Comando para personalidad en inglés
+        if mensaje.lower() in ['/english', '/en', '/inglés', '/ingles']:
+            # Activar personalidad en inglés (usando configuración del JSON)
+            personalidad_en = config_agente.get('personalidad_en', {})
+            tono_actual = config_agente.get('personalidad', {}).get('tono', 'puteado')
+            if tono_actual == 'puteado':
+                prompt_en = personalidad_en.get('prompt_sistema_puteado', 'You are Ray, a helpful assistant.')
+            else:
+                prompt_en = personalidad_en.get('prompt_sistema_amigable', 'You are Ray, a friendly assistant.')
+            
+            # Guardar estado de idioma para este usuario
+            if 'idioma_override' not in conversaciones:
+                conversaciones['idioma_override'] = {}
+            conversaciones['idioma_override'][user_id] = 'en'
+            
+            limpiar_historial(user_id)
+            logger.info(f"🌐 {user_id} switched to ENGLISH personality")
+            return jsonify({
+                "respuesta": "ayo what's good nigga, Ray's in the building now 💪 I switched to English mode. whatchu need bruh?",
+                "user_id": user_id
+            })
+        
+        # Comando para volver a español
+        if mensaje.lower() in ['/español', '/espanol', '/spanish', '/es']:
+            if 'idioma_override' in conversaciones and user_id in conversaciones.get('idioma_override', {}):
+                del conversaciones['idioma_override'][user_id]
+            limpiar_historial(user_id)
+            logger.info(f"🌐 {user_id} volvió a personalidad en ESPAÑOL")
+            return jsonify({
+                "respuesta": "orale wey, ya volvi al español ke pedo, ke kieres?",
                 "user_id": user_id
             })
         
@@ -324,11 +286,18 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
                 "user_id": user_id
             })
         
+        # Limpiar prefijo de comando para detección de intenciones
+        mensaje_limpio = mensaje
+        for cmd in ['/raymundo', '/rai', '/puteado', '/amigable', '/friendly', '/ray', '/putedo']:
+            if mensaje_limpio.lower().startswith(cmd):
+                mensaje_limpio = mensaje_limpio[len(cmd):].strip()
+                break
+        
         # Aprender vocabulario del usuario
-        gestor.memory.aprender_vocabulario(mensaje)
+        gestor.memory.aprender_vocabulario(mensaje_limpio)
         
         # Procesar mensaje (detectar intención)
-        resultado_herramienta = gestor.procesar_mensaje(mensaje)
+        resultado_herramienta = gestor.procesar_mensaje(mensaje_limpio)
         
         if resultado_herramienta['ejecuto_herramienta']:
             respuesta = resultado_herramienta['resultado']
@@ -427,8 +396,9 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
             
             return jsonify(response_data)
         else:
-            # Usar chat híbrido normal
-            respuesta = gestor.chat_hibrido(mensaje)
+            # Usar chat híbrido normal con soporte bilingüe
+            idioma_override = conversaciones.get('idioma_override', {}).get(user_id)
+            respuesta = gestor.chat_hibrido(mensaje, idioma_override=idioma_override)
             
             # Calcular tiempo de respuesta
             tiempo_respuesta = time.time() - tiempo_inicio
@@ -618,15 +588,18 @@ def text_to_speech():
         
         logger.info(f"🔊 Generando audio para {user_id}: {texto[:50]}...")
         
-        # Limpiar texto (quitar emojis y caracteres especiales)
-        texto_limpio = ''.join(c for c in texto if c.isalnum() or c.isspace() or c in '.,;:¿?¡!-')
+        # Limpiar texto (quitar emojis y caracteres especiales, preservar apostrofes para slangs)
+        texto_limpio = ''.join(c for c in texto if c.isalnum() or c.isspace() or c in ".,;:¿?¡!-'\"")
         
         # Limitar longitud
         if len(texto_limpio) > 500:
             texto_limpio = texto_limpio[:500] + "..."
         
+        # Detectar idioma del texto para usar la voz correcta
+        tts_idioma = conversaciones.get('idioma_override', {}).get(user_id) or detector_idioma.detectar(texto_limpio)
+        
         # Generar audio
-        audio_path = audio_handler.text_to_speech(texto_limpio)
+        audio_path = audio_handler.text_to_speech(texto_limpio, language=tts_idioma)
         
         if not audio_path:
             return jsonify({
@@ -704,9 +677,22 @@ def audio_chat():
         if resultado_herramienta['ejecuto_herramienta']:
             respuesta = resultado_herramienta['resultado']
         else:
-            # Chat normal
+            # Chat normal with bilingual routing
             historial = get_historial(user_id)
-            prompt_sistema = config_agente.get('personalidad', {}).get('prompt_sistema', '')
+            
+            # Detectar idioma para seleccionar prompt
+            idioma_override = conversaciones.get('idioma_override', {}).get(user_id)
+            idioma = idioma_override or detector_idioma.detectar(texto)
+            
+            if idioma == 'en':
+                personalidad_en = config_agente.get('personalidad_en', {})
+                tono = config_agente.get('personalidad', {}).get('tono', 'puteado')
+                if tono == 'puteado':
+                    prompt_sistema = personalidad_en.get('prompt_sistema_puteado', 'You are Ray.')
+                else:
+                    prompt_sistema = personalidad_en.get('prompt_sistema_amigable', 'You are Ray.')
+            else:
+                prompt_sistema = config_agente.get('personalidad', {}).get('prompt_sistema', '')
             
             messages = [{"role": "system", "content": prompt_sistema}]
             messages.extend(historial[-10:])
@@ -720,13 +706,15 @@ def audio_chat():
         
         logger.info(f"💬 Respuesta: {respuesta[:50]}...")
         
-        # 3. Convertir respuesta a audio
-        texto_limpio = ''.join(c for c in respuesta if c.isalnum() or c.isspace() or c in '.,;:¿?¡!-')
+        # 3. Convertir respuesta a audio (preservar slangs y apostrofes)
+        texto_limpio = ''.join(c for c in respuesta if c.isalnum() or c.isspace() or c in ".,;:¿?¡!-'\"")
         
         if len(texto_limpio) > 500:
             texto_limpio = texto_limpio[:500] + "..."
         
-        audio_path = audio_handler.text_to_speech(texto_limpio)
+        # Detectar idioma para usar la voz correcta en TTS
+        tts_idioma = conversaciones.get('idioma_override', {}).get(user_id) or detector_idioma.detectar(respuesta)
+        audio_path = audio_handler.text_to_speech(texto_limpio, language=tts_idioma)
         
         if not audio_path:
             return jsonify({

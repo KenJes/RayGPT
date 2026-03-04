@@ -202,6 +202,7 @@ config_local.py
 *.bak
 *.backup
 *.old
+raymundo_backup.py
 
 # ==============================================================================
 # ARCHIVOS QUE SÍ SE DEBEN INCLUIR
