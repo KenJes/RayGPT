@@ -1,205 +1,137 @@
-#  Raymundo - Asistente IA Personal
+﻿# Raymundo - Asistente IA Personal
 
-**Raymundo** es un asistente de inteligencia artificial versátil que combina múltiples modelos de IA para ofrecerte una experiencia completa de productividad y automatización.
-
----
-
-##  Funcionalidades Principales
-
-###  Chat Inteligente
-- **Conversación natural** con memoria contextual
-- **Dos personalidades intercambiables:**
-  -  **Raymundo** (amigable): Profesional, claro y motivador
-  -  **rAI** (directo): Informal, agresivo pero efectivo
-- **Cambio de personalidad en tiempo real** con comandos `/amigable` o `/puteado`
-- Respuestas con análisis de ortografía y contexto
-
-###  Creación Automática de Documentos
-Genera contenido profesional con tu estilo de personalidad:
-
-- ** Presentaciones** (Google Slides)
-  - Con imágenes automáticas desde web
-  - Diseño visual atractivo
-  - Estructura profesional
-
-- ** Documentos** (Google Docs)
-  - Formato markdown avanzado
-  - Estructura clara y organizada
-  - Exportable a DOCX
-
-- ** Hojas de Cálculo** (Google Sheets)
-  - Datos organizados
-  - Fórmulas y estructuras automáticas
-  - Exportable a XLSX
-
-###  Análisis de Imágenes
-- **Visión por computadora** con GPT-4o Vision
-- Describe, analiza y extrae información de imágenes
-- Reconocimiento de objetos, textos y contexto
-
-###  Lectura de Documentos
-- **PDF, DOCX, TXT, MD** - Lectura y análisis
-- Extracción de información clave
-- Resúmenes automáticos
-
-###  Web Scraping Inteligente
-- Extrae contenido de páginas web
-- Analiza y resume información
-- Búsqueda de imágenes en Google
-
-###  Capacidades de Audio
-- **Texto a Voz (TTS)** con Piper TTS
-- **Voz a Texto (STT)** con OpenAI Whisper
-- **Chat por voz** en WhatsApp
-- Respuestas en audio automáticas
-
-###  Integración WhatsApp
-- Bot de WhatsApp completamente funcional
-- Todas las funcionalidades disponibles por mensajería
-- Soporte para mensajes de voz
-- Manejo de archivos adjuntos
+**Raymundo** es un asistente de inteligencia artificial que combina multiples modelos de IA para ofrecer una experiencia completa de productividad y automatizacion.
 
 ---
 
-##  Instalación Rápida
+## Funcionalidades Principales
+
+### Chat Inteligente
+- Conversacion natural con memoria contextual persistente
+- Dos personalidades intercambiables:
+  - **Raymundo** (amigable): Profesional, claro y motivador
+  - **rAI** (directo): Informal, agresivo pero efectivo
+- Cambio de personalidad en tiempo real con `/amigable` o `/puteado`
+- Aprende el vocabulario del usuario e lo incorpora en respuestas
+
+### Creacion Automatica de Documentos
+- **Presentaciones** (Google Slides) con imagenes automaticas y diseno visual
+- **Documentos** (Google Docs) en formato markdown, exportable a DOCX
+- **Hojas de Calculo** (Google Sheets) con estructuras automaticas, exportable a XLSX
+
+### Capacidades Adicionales
+- **Vision por computadora** con GPT-4o Vision - analiza imagenes
+- **Lectura de documentos** - PDF, DOCX, TXT, MD
+- **Web Scraping** - extrae y resume contenido de paginas web
+- **Audio** - Texto a Voz (Piper TTS) y Voz a Texto (OpenAI Whisper)
+- **WhatsApp Bot** - todas las funcionalidades por mensajeria
+
+### Multi-Agente (FastAPI)
+- Orchestrator (puerto 8000) - punto central de coordinacion
+- Research Agent (8001) - investigacion web e inteligencia de mercado
+- Propuesta Agent (8002) - generador de propuestas para municipios
+- Google Agent (8003) - creacion de documentos en Google Workspace
+
+---
+
+## Instalacion Rapida
 
 ### Requisitos
-- Python 3.9 o superior
+- Python 3.9+
 - Node.js 16+ (para WhatsApp)
 - Git
 - Cuenta de Google Cloud (para documentos)
 
 ### 1. Clonar el repositorio
-```bash
-git clone https://github.com/tu-usuario/RayGPT.git
+``bash
+git clone https://github.com/KenJes/RayGPT.git
 cd RayGPT
-```
-
+``n
 ### 2. Crear entorno virtual
-```bash
+``bash
 python -m venv .venv
 .venv\Scripts\activate  # Windows
 source .venv/bin/activate  # Linux/Mac
-```
-
+``n
 ### 3. Instalar dependencias
-```bash
-# Python
-pip install -r resources/setup/requirements_audio.txt
-
-# Node.js (para WhatsApp)
-npm install
-```
-
+``bash
+pip install -r requirements.txt
+``n
 ### 4. Configurar credenciales
 
-#### a) Copiar archivo de ejemplo
-```bash
-# Windows
-copy resources\examples\env.example config\.env
-
-# Linux/Mac
-cp resources/examples/env.example config/.env
-```
-
-#### b) Editar `config/.env` y agregar tus API keys:
-```env
+Crea `config/.env` con tus API keys:
+``env
 GITHUB_TOKEN=ghp_tu_token_aqui
 GROQ_API_KEY=gsk_tu_api_key_aqui
-GOOGLE_CREDENTIALS_FILE=config/google-credentials.json
-```
-
-#### c) Descargar credenciales de Google:
-1. Ve a [Google Cloud Console](https://console.cloud.google.com/apis/credentials)
-2. Crea una Service Account
-3. Descarga el JSON
-4. Guárdalo como `config/google-credentials.json`
-
-### 5. (Opcional) Configurar Audio
-```bash
-# Windows
-.\instalar_audio.bat
-
-# Linux/Mac
-chmod +x instalar_audio.sh
-./instalar_audio.sh
-```
-
+``n
 ---
 
-##  Uso
+## Uso
 
-### Modo Local (Interfaz Gráfica)
-```bash
+### Interfaz grafica
+``bash
 python raymundo.py
-```
-
-Funciones:
-- Chat con memoria contextual
-- Botón para grabar voz
-- Botón para escuchar respuestas
-- Adjuntar imágenes y documentos
-- Cambiar personalidad con `/puteado` o `/amigable`
+``n
+### Agentes multi-servicio
+``bash
+python agentes/orchestrator.py    # 8000
+python agentes/research_agent.py  # 8001
+python agentes/propuesta_agent.py # 8002
+python agentes/google_agent.py    # 8003
+``n
+O lanza con: `Axoloit Agentes.bat`
 
 ### Modo WhatsApp
-
-#### Terminal 1: Servidor
-```bash
+``bash
 python whatsapp_server.py
-```
+node resources/whatsapp/whatsapp_bot.js
+``n
+---
 
-#### Terminal 2: Bot de WhatsApp
-```bash
-node whatsapp_bot.js
-```
+## Arquitectura
 
-Escanea el código QR con WhatsApp y comienza a chatear.
+``n core/                          Paquete modular central
+    config.py                  Configuracion y personalidad
+    ai_clients.py              OllamaClient, GitHubModelsClient, GroqClient
+    tools.py                   GestorHerramientas (orquestacion)
+    memory.py                  Memoria persistente y vocabulario
+    detectors.py               Deteccion de intenciones e idioma
+    processors.py              Vision, documentos, emojis
+    web_scraper.py
+    google_workspace_client.py
+    audio_handler.py
+
+ agentes/                      Microservicios FastAPI
+    orchestrator.py            Puerto 8000
+    research_agent.py          Puerto 8001
+    propuesta_agent.py         Puerto 8002
+    google_agent.py            Puerto 8003
+    base_agent.py              Utilidades compartidas
+
+ raymundo.py                   GUI principal (250 lineas)
+ whatsapp_server.py            Servidor Flask para WhatsApp
+``n
+### Modelos de IA (cadena de fallback automatica)
+- **Groq API** - Llama 3.3 70B (primera prioridad, 14,400 RPD gratis)
+- **GitHub Models** - GPT-4o (segunda prioridad)
+- **Ollama** (local / GPU) - Qwen 2.5:7b (fallback local)
 
 ---
 
-##  Arquitectura
+## Tecnologias
 
-```
-Raymundo 2.0
-├──  Modelos de IA
-│   ├── Ollama (local) - Qwen 2.5:7b
-│   ├── Groq API - Llama 3.3 70B
-│   └── GitHub Models - GPT-4o
-│
-├──  Herramientas
-│   ├── Google Workspace (Docs, Slides, Sheets)
-│   ├── Visión (GPT-4o Vision)
-│   ├── Audio (Piper TTS + Whisper STT)
-│   └── Web Scraping
-│
-└──  Interfaces
-    ├── GUI Local (Tkinter)
-    ├── WhatsApp Bot (Node.js)
-    └── API REST (Flask)
-```
+| Capa | Tecnologia |
+|------|------------|
+| Backend | Python 3.9+, Flask, FastAPI |
+| GUI | Tkinter |
+| IA local | Ollama (Qwen 2.5) |
+| IA cloud | Groq API, GitHub Models (GPT-4o) |
+| STT | OpenAI Whisper |
+| TTS | Piper TTS, pyttsx3, gTTS |
+| Documentos | Google Workspace API |
+| WhatsApp | whatsapp-web.js (Node.js) |
+| Web scraping | BeautifulSoup4 |
 
 ---
 
-## Tecnologías
-
-### Backend
-- Python 3.9+
-- Flask (API REST)
-- Tkinter (GUI)
-
-### IA y ML
-- Ollama (Qwen 2.5)
-- Groq API (Llama 3.3)
-- GitHub Models (GPT-4o)
-- OpenAI Whisper (STT)
-- Piper TTS
-
-### Integraciones
-- Google Workspace API
-- WhatsApp Web.js
-- BeautifulSoup4 (Web Scraping)
-
-### Node.js
-- whatsapp-web.js
-- axios
-- qrcode-terminal
+**Version:** 3.0 (modular)
