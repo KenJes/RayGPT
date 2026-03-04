@@ -65,10 +65,26 @@ class MemorySystem:
             self.memory["images"] = self.memory["images"][-max_items:]
         self.save_memory()
 
+    def get_vocabulario_hint(self, top_n: int = 15) -> str:
+        """Devuelve un hint con el vocabulario más frecuente del usuario para inyectar en el system prompt."""
+        vocab = self.memory.get("vocabulario_usuario", {})
+        if not vocab:
+            return ""
+        top = sorted(vocab.items(), key=lambda x: x[1], reverse=True)[:top_n]
+        palabras = ", ".join(w for w, _ in top)
+        return (
+            f"\n\nVOCABULARIO DEL USUARIO: Este usuario usa frecuentemente "
+            f"estas palabras y expresiones: {palabras}. "
+            f"Incorpóralas naturalmente en tus respuestas según el contexto y tu personalidad."
+        )
+
     def aprender_vocabulario(self, mensaje_usuario):
         palabras_comunes = {
             "que", "para", "con", "por", "una", "los", "las",
-            "del", "como", "sobre", "esto", "eso",
+            "del", "como", "sobre", "esto", "eso", "hay", "más",
+            "cuando", "donde", "quien", "cual", "qué", "cómo",
+            "pero", "este", "esta", "tiene", "hacer", "puede",
+            "ser", "ver", "dar", "fue", "son", "algo", "todo",
         }
         palabras = mensaje_usuario.lower().split()
         for palabra in palabras:

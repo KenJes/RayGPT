@@ -280,7 +280,9 @@ class ChatGUI:
         return len(mensaje) < 50 or any(p in mensaje.lower() for p in palabras_simples)
 
     def _chat_ollama(self, mensaje):
-        prompt = f"{config_agente.get_prompt_sistema()}\n\nUsuario: {mensaje}\nAsistente:"
+        prompt_base = config_agente.get_prompt_sistema()
+        vocab_hint = self.herramientas.memory.get_vocabulario_hint()
+        prompt = f"{prompt_base}{vocab_hint}\n\nUsuario: {mensaje}\nAsistente:"
         return self.ollama.generate(prompt, temperature=0.7) or "Error al conectar con Ollama"
 
     def _chat_hibrido(self, mensaje):

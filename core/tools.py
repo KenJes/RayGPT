@@ -36,6 +36,9 @@ class GestorHerramientas:
     def procesar_mensaje(self, mensaje, af_delegar=None, af_disponible=None):
         """Procesa mensaje y detecta intenciones."""
 
+        # Aprender vocabulario del usuario en cada mensaje
+        self.memory.aprender_vocabulario(mensaje)
+
         # 0. Comandos rápidos
         cmd = self._procesar_comando_rapido(mensaje)
         if cmd:
@@ -324,6 +327,11 @@ Sin markdown extra, sin explicaciones fuera del JSON."""
             prompt_sistema = config_agente.get("personalidad", {}).get(
                 "prompt_sistema", "Eres un asistente útil y amigable."
             )
+
+        # Inyectar vocabulario del usuario aprendido
+        vocab_hint = self.memory.get_vocabulario_hint()
+        if vocab_hint:
+            prompt_sistema += vocab_hint
 
         messages = [
             {"role": "system", "content": prompt_sistema},
