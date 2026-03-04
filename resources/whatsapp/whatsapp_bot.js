@@ -66,10 +66,11 @@ client.on('auth_failure', msg => {
   console.error('❌ Error de autenticación en WhatsApp:', msg);
 });
 
-async function enviarMensajeAlServidor(texto, userId) {
+async function enviarMensajeAlServidor(texto, userId, userName) {
   const payload = {
     mensaje: texto,
-    user_id: userId
+    user_id: userId,
+    user_name: userName || userId
   };
 
   const { data } = await axios.post(CHAT_ENDPOINT, payload, {
@@ -120,9 +121,18 @@ client.on('message_create', async message => {
   const chatId = message.fromMe ? message.to : message.from;
   const userId = message.from;
 
+  // Obtener nombre del contacto
+  let userName = userId;
+  try {
+    const contact = await message.getContact();
+    userName = contact.pushname || contact.name || contact.number || userId;
+  } catch (e) {
+    // fallback al userId si falla
+  }
+
   // Logging detallado para debug
   console.log(`💬 [${BOT_INSTANCE_ID}] Mensaje recibido:`);
-  console.log(`   - From: ${userId}`);
+  console.log(`   - From: ${userId} (${userName})`);
   console.log(`   - fromMe: ${message.fromMe}`);
   console.log(`   - Chat destino: ${chatId}`);
   console.log(`   - Texto: ${texto.substring(0, 80)}`);
@@ -158,13 +168,13 @@ client.on('message_create', async message => {
   const solicitaAudio = detectarSolicitudAudio(texto);
 
   if (solicitaAudio) {
-    await manejarComandoAudio(message, texto, chatId);
+    await manejarComandoAudio(message, texto, chatId, userId, userName);
     return;
   }
 
   try {
     await message.reply('🤖 Procesando tu mensaje, dame un momento...');
-    const respuesta = await enviarMensajeAlServidor(texto, userId);
+    const respuesta = await enviarMensajeAlServidor(texto, userId, userName);
 
     if (respuesta.respuesta) {
       await client.sendMessage(chatId, respuesta.respuesta);
@@ -284,8 +294,8 @@ function limpiarMensajeParaAudio(mensaje) {
   return limpio;
 }
 
-async function manejarComandoAudio(message, textoCompleto, chatId) {
-  console.log(`🎙️ [${BOT_INSTANCE_ID}] Audio solicitado para chat ${chatId}`);
+async function manejarComandoAudio(message, textoCompleto, chatId, userId, userName) {
+  console.log(`🎤 [${BOT_INSTANCE_ID}] Audio solicitado para chat ${chatId} (${userName || userId})`);
 
   try {
     // 1. Limpiar comandos del bot (/ray, /raymundo, etc.)
@@ -317,7 +327,7 @@ async function manejarComandoAudio(message, textoCompleto, chatId) {
     // NO enviar mensaje de estado — solo enviaremos el audio + transcripción al final
 
     // 3. Enviar TEMA LIMPIO al agente — UNA SOLA llamada al LLM
-    const respuestaChat = await enviarMensajeAlServidor(mensajeParaIA, chatId);
+    const respuestaChat = await enviarMensajeAlServidor(mensajeParaIA, userId || chatId, userName);
 
     if (!respuestaChat.respuesta) {
       await message.reply('⚠️  No pude obtener una respuesta del agente.');

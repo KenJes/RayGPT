@@ -127,6 +127,14 @@ except Exception as e:
 conversaciones = {}
 MAX_HISTORY = 10  # Últimos N mensajes por usuario
 
+# Personalidad y nombre por usuario (override independiente por sesión)
+# Formato: {user_id: {"tono": "puteado"|"amigable", "idioma": "es"|"en"}}
+personalidades_por_usuario = {}
+
+# Nombres de contacto conocidos
+# Formato: {user_id: "Nombre"}
+nombres_contactos = {}
+
 def get_historial(user_id):
     """Obtiene el historial de un usuario"""
     if user_id not in conversaciones:
@@ -145,6 +153,49 @@ def limpiar_historial(user_id):
     """Limpia el historial de un usuario"""
     if user_id in conversaciones:
         del conversaciones[user_id]
+
+def get_tono_usuario(user_id):
+    """Devuelve el tono activo para un usuario (per-user override o global)."""
+    if user_id in personalidades_por_usuario:
+        return personalidades_por_usuario[user_id].get("tono")
+    return config_agente.get("personalidad", {}).get("tono", "puteado")
+
+def set_tono_usuario(user_id, tono):
+    """Configura el tono para un usuario específico."""
+    if user_id not in personalidades_por_usuario:
+        personalidades_por_usuario[user_id] = {}
+    personalidades_por_usuario[user_id]["tono"] = tono
+    limpiar_historial(user_id)
+
+def detectar_cambio_personalidad_natural(texto):
+    """
+    Detecta si el usuario pide un cambio de personalidad en lenguaje natural.
+    Devuelve 'amigable', 'puteado', o None.
+    """
+    t = texto.lower()
+    amigable = [
+        'se amable', 'sé amable', 'se educado', 'sé educado', 'se respetuoso',
+        'sé respetuoso', 'modo amable', 'modo educado', 'modo respetuoso',
+        'cambia a amigable', 'cambia a modo amable', 'cambia a educado',
+        'sin groserías', 'sin groseria', 'no seas grosero', 'no seas maleducado',
+        'habla bien', 'portate bien', 'compórtate', 'comportate',
+        'se formal', 'sé formal', 'modo formal', 'modo profesional',
+    ]
+    grosero = [
+        'se grosero', 'sé grosero', 'se puteado', 'sé puteado',
+        'modo grosero', 'modo puteado', 'modo rudo', 'modo directo',
+        'cambia a grosero', 'cambia a puteado', 'cambia a rai',
+        'se rudo', 'sé rudo', 'se relajado', 'sé relajado',
+        'puedes insultar', 'di groserías', 'di groseria',
+        'habla con groserías', 'habla mal',
+    ]
+    for frase in amigable:
+        if frase in t:
+            return 'amigable'
+    for frase in grosero:
+        if frase in t:
+            return 'puteado'
+    return None
 
 # ====================================
 # ENDPOINTS
@@ -187,13 +238,20 @@ def chat():
         
         mensaje = data['mensaje'].strip()
         user_id = data.get('user_id', 'default')  # ID del usuario (opcional)
+        user_name = data.get('user_name', '').strip() or None  # Nombre del contacto WA
+
+        # Guardar/actualizar nombre conocido del contacto
+        if user_name and user_name != user_id:
+            nombres_contactos[user_id] = user_name
+        elif user_id in nombres_contactos:
+            user_name = nombres_contactos[user_id]
         
         if not mensaje:
             return jsonify({
                 "error": "El mensaje no puede estar vacío"
             }), 400
         
-        logger.info(f"📩 Mensaje de {user_id}: {mensaje[:50]}...")
+        logger.info(f"📩 Mensaje de {user_name or user_id} [{user_id}]: {mensaje[:50]}...")
         
         # Iniciar temporizador
         tiempo_inicio = time.time()
@@ -205,24 +263,18 @@ def chat():
                 "user_id": user_id
             })
         
-        # Comandos de cambio de personalidad
+        # Comandos de cambio de personalidad — ahora son PER-USER
         if mensaje.lower() in ['/puteado', '/putedo', '/rai']:
-            config_agente_module.cambiar_personalidad('puteado')
-            # Sincronizar config local
-            config_agente['personalidad'] = dict(config_agente_module.get('personalidad', {}))
-            limpiar_historial(user_id)
-            logger.info(f"🔄 {user_id} cambió a personalidad PUTEADO")
+            set_tono_usuario(user_id, 'puteado')
+            logger.info(f"🔄 {user_name or user_id} cambió a personalidad PUTEADO")
             return jsonify({
                 "respuesta": "oke wey, haora soy rAI, un puto ke no se anda kon mamadas. ke chingaos kieres?",
                 "user_id": user_id
             })
         
         if mensaje.lower() in ['/amigable', '/raymundo', '/ray', '/friendly']:
-            config_agente_module.cambiar_personalidad('amigable')
-            # Sincronizar config local
-            config_agente['personalidad'] = dict(config_agente_module.get('personalidad', {}))
-            limpiar_historial(user_id)
-            logger.info(f"🔄 {user_id} cambió a personalidad AMIGABLE")
+            set_tono_usuario(user_id, 'amigable')
+            logger.info(f"🔄 {user_name or user_id} cambió a personalidad AMIGABLE")
             return jsonify({
                 "respuesta": "¡Hola! Ahora estoy en modo amigable 😊 ¿En qué puedo ayudarte?",
                 "user_id": user_id
@@ -292,12 +344,22 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
             if mensaje_limpio.lower().startswith(cmd):
                 mensaje_limpio = mensaje_limpio[len(cmd):].strip()
                 break
-        
-        # Aprender vocabulario del usuario
-        gestor.memory.aprender_vocabulario(mensaje_limpio)
-        
-        # Procesar mensaje (detectar intención)
-        resultado_herramienta = gestor.procesar_mensaje(mensaje_limpio)
+
+        # Detectar cambio de personalidad en lenguaje natural
+        cambio_natural = detectar_cambio_personalidad_natural(mensaje_limpio)
+        if cambio_natural:
+            set_tono_usuario(user_id, cambio_natural)
+            logger.info(f"🔄 {user_name or user_id} cambió a {cambio_natural} (lenguaje natural)")
+
+        logger.info(f"📩 [{user_name or user_id}] {mensaje_limpio[:60]}...")
+
+        # Procesar mensaje (detectar intención, aprender vocabulario internamente)
+        resultado_herramienta = gestor.procesar_mensaje(
+            mensaje_limpio,
+            user_name=user_name,
+            user_id=user_id,
+            tono_override=get_tono_usuario(user_id),
+        )
         
         if resultado_herramienta['ejecuto_herramienta']:
             respuesta = resultado_herramienta['resultado']
@@ -398,7 +460,13 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
         else:
             # Usar chat híbrido normal con soporte bilingüe
             idioma_override = conversaciones.get('idioma_override', {}).get(user_id)
-            respuesta = gestor.chat_hibrido(mensaje, idioma_override=idioma_override)
+            respuesta = gestor.chat_hibrido(
+                mensaje,
+                idioma_override=idioma_override,
+                user_name=user_name,
+                user_id=user_id,
+                tono_override=get_tono_usuario(user_id),
+            )
             
             # Calcular tiempo de respuesta
             tiempo_respuesta = time.time() - tiempo_inicio

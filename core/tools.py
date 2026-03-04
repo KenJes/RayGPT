@@ -33,11 +33,12 @@ class GestorHerramientas:
 
     # ───── Punto de entrada principal ─────────────────────────
 
-    def procesar_mensaje(self, mensaje, af_delegar=None, af_disponible=None):
+    def procesar_mensaje(self, mensaje, af_delegar=None, af_disponible=None,
+                         user_name=None, user_id=None, tono_override=None):
         """Procesa mensaje y detecta intenciones."""
 
-        # Aprender vocabulario del usuario en cada mensaje
-        self.memory.aprender_vocabulario(mensaje)
+        # Aprender vocabulario del usuario (separado por user_id si viene de WhatsApp)
+        self.memory.aprender_vocabulario(mensaje, user_id=user_id)
 
         # 0. Comandos rápidos
         cmd = self._procesar_comando_rapido(mensaje)
@@ -319,7 +320,8 @@ Sin markdown extra, sin explicaciones fuera del JSON."""
 
     # ───── Chat híbrido (Smart Routing) ────────────────────────
 
-    def chat_hibrido(self, mensaje, idioma_override=None):
+    def chat_hibrido(self, mensaje, idioma_override=None,
+                     user_name=None, user_id=None, tono_override=None):
         idioma = idioma_override or self.detector_idioma.detectar(mensaje)
         if idioma == "en":
             prompt_sistema = config_agente.get_prompt_sistema_en()
@@ -328,8 +330,27 @@ Sin markdown extra, sin explicaciones fuera del JSON."""
                 "prompt_sistema", "Eres un asistente útil y amigable."
             )
 
-        # Inyectar vocabulario del usuario aprendido
-        vocab_hint = self.memory.get_vocabulario_hint()
+        # Inyectar nombre del interlocutor
+        if user_name and user_name.strip() and user_name != user_id:
+            prompt_sistema += (
+                f"\n\nESTÁS CHATEANDO CON: {user_name}. "
+                f"Llámalo/a por su nombre ({user_name}) en tus respuestas cuando sea natural."
+            )
+
+        # Inyectar tono por usuario (override independiente del config global)
+        if tono_override == 'amigable':
+            prompt_sistema += (
+                "\n\nMODO DE ESTA CONVERSACIÓN: El usuario ha pedido que seas amable, "
+                "respetuoso y sin groserías. Sé cordial y profesional sin insultos."
+            )
+        elif tono_override == 'puteado':
+            prompt_sistema += (
+                "\n\nMODO DE ESTA CONVERSACIÓN: El usuario quiere tu modo directo y grosero. "
+                "Usa tu personalidad rAI puteada sin filtros."
+            )
+
+        # Inyectar vocabulario del usuario aprendido (por usuario)
+        vocab_hint = self.memory.get_vocabulario_hint(user_id=user_id)
         if vocab_hint:
             prompt_sistema += vocab_hint
 
