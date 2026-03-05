@@ -133,7 +133,7 @@ class MemorySystem:
             self.memory["images"] = self.memory["images"][-max_items:]
         self.save_memory()
 
-def get_vocabulario_hint(self, user_id=None, top_n: int = 8) -> str:
+    def get_vocabulario_hint(self, user_id=None, top_n: int = 8) -> str:
         """
         Genera un hint de ESTILO basado en el argot/slang que usa el usuario.
         Solo incluye palabras de estilo informal — nunca temas ni palabras genéricas.
