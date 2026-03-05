@@ -158,7 +158,7 @@ def get_tono_usuario(user_id):
     """Devuelve el tono activo para un usuario (per-user override o global)."""
     if user_id in personalidades_por_usuario:
         return personalidades_por_usuario[user_id].get("tono")
-    return config_agente.get("personalidad", {}).get("tono", "puteado")
+    return config_agente.get("personalidad", {}).get("tono", "amigable")
 
 def set_tono_usuario(user_id, tono):
     """Configura el tono para un usuario específico."""
@@ -166,6 +166,28 @@ def set_tono_usuario(user_id, tono):
         personalidades_por_usuario[user_id] = {}
     personalidades_por_usuario[user_id]["tono"] = tono
     limpiar_historial(user_id)
+
+# Palabras que indican que el usuario está siendo agresivo en ESTE mensaje
+_PALABRAS_AGRESIVAS = {
+    'pendejo', 'pendeja', 'pendejos', 'puto', 'puta', 'putos', 'putas',
+    'cabron', 'cabrón', 'cabrona', 'chinga', 'chingada', 'chingon', 'chingo',
+    'verga', 'vergas', 'naco', 'naca', 'pinche', 'pinches', 'culero', 'culera',
+    'mierda', 'estupido', 'estúpido', 'imbecil', 'imbécil', 'idiota',
+    'mamada', 'mamadas', 'maldito', 'bastardo', 'putisimo', 'putísimo',
+    'gey', 'wey', 'guey',  # wey puede ser agresivo en contexto de insulto
+    'joto', 'marica', 'perra', 'perro',  # como insulto
+    'fuck', 'shit', 'ass', 'bitch',
+}
+
+def detectar_agresividad_usuario(texto):
+    """
+    Detecta si el mensaje actual contiene lenguaje agresivo/grosero.
+    Devuelve True si el usuario está siendo agresivo en ESTE mensaje.
+    No cambia la configuración permanente — solo da contexto para esta respuesta.
+    """
+    palabras = re.sub(r'[^a-záéíóúüñ ]', ' ', texto.lower()).split()
+    conteo = sum(1 for p in palabras if p in _PALABRAS_AGRESIVAS)
+    return conteo >= 1
 
 def detectar_cambio_personalidad_natural(texto):
     """
@@ -180,14 +202,14 @@ def detectar_cambio_personalidad_natural(texto):
         'sin groserías', 'sin groseria', 'no seas grosero', 'no seas maleducado',
         'habla bien', 'portate bien', 'compórtate', 'comportate',
         'se formal', 'sé formal', 'modo formal', 'modo profesional',
+        'presenta respetuosamente', 'presentate respetuosamente',
     ]
     grosero = [
         'se grosero', 'sé grosero', 'se puteado', 'sé puteado',
         'modo grosero', 'modo puteado', 'modo rudo', 'modo directo',
         'cambia a grosero', 'cambia a puteado', 'cambia a rai',
-        'se rudo', 'sé rudo', 'se relajado', 'sé relajado',
-        'puedes insultar', 'di groserías', 'di groseria',
-        'habla con groserías', 'habla mal',
+        'se rudo', 'sé rudo', 'puedes insultar', 'di groserías', 'di groseria',
+        'habla con groserías', 'habla mal', 'suéltate', 'sueltate',
     ]
     for frase in amigable:
         if frase in t:
@@ -353,12 +375,16 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
 
         logger.info(f"📩 [{user_name or user_id}] {mensaje_limpio[:60]}...")
 
+        # Detectar si el usuario está siendo agresivo en ESTE mensaje (no persistente)
+        usuario_agresivo = detectar_agresividad_usuario(mensaje_limpio)
+
         # Procesar mensaje (detectar intención, aprender vocabulario internamente)
         resultado_herramienta = gestor.procesar_mensaje(
             mensaje_limpio,
             user_name=user_name,
             user_id=user_id,
             tono_override=get_tono_usuario(user_id),
+            usuario_agresivo=usuario_agresivo,
         )
         
         if resultado_herramienta['ejecuto_herramienta']:
@@ -466,6 +492,7 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
                 user_name=user_name,
                 user_id=user_id,
                 tono_override=get_tono_usuario(user_id),
+                usuario_agresivo=usuario_agresivo,
             )
             
             # Calcular tiempo de respuesta

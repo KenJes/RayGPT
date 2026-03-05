@@ -34,7 +34,7 @@ class GestorHerramientas:
     # ───── Punto de entrada principal ─────────────────────────
 
     def procesar_mensaje(self, mensaje, af_delegar=None, af_disponible=None,
-                         user_name=None, user_id=None, tono_override=None):
+                         user_name=None, user_id=None, tono_override=None, usuario_agresivo=False):
         """Procesa mensaje y detecta intenciones."""
 
         # Aprender vocabulario del usuario (separado por user_id si viene de WhatsApp)
@@ -321,7 +321,7 @@ Sin markdown extra, sin explicaciones fuera del JSON."""
     # ───── Chat híbrido (Smart Routing) ────────────────────────
 
     def chat_hibrido(self, mensaje, idioma_override=None,
-                     user_name=None, user_id=None, tono_override=None):
+                     user_name=None, user_id=None, tono_override=None, usuario_agresivo=False):
         idioma = idioma_override or self.detector_idioma.detectar(mensaje)
         if idioma == "en":
             prompt_sistema = config_agente.get_prompt_sistema_en()
@@ -337,19 +337,26 @@ Sin markdown extra, sin explicaciones fuera del JSON."""
                 f"Llámalo/a por su nombre ({user_name}) en tus respuestas cuando sea natural."
             )
 
-        # Inyectar tono por usuario (override independiente del config global)
+        # Inyectar señal de tono: persistente O por agresividad detectada en este mensaje
         if tono_override == 'amigable':
             prompt_sistema += (
-                "\n\nMODO DE ESTA CONVERSACIÓN: El usuario ha pedido que seas amable, "
-                "respetuoso y sin groserías. Sé cordial y profesional sin insultos."
+                "\n\nINSTRUCCIÓN DE TONO: El usuario pidió que seas amable y respetuoso. "
+                "Sé cordial, sin groserías, aunque él use alguna."
             )
         elif tono_override == 'puteado':
             prompt_sistema += (
-                "\n\nMODO DE ESTA CONVERSACIÓN: El usuario quiere tu modo directo y grosero. "
-                "Usa tu personalidad rAI puteada sin filtros."
+                "\n\nINSTRUCCIÓN DE TONO: El usuario quiere tu modo directo sin filtros. "
+                "Groserías permitidas, sé agresivo y directo."
+            )
+        elif usuario_agresivo:
+            # Sin override permanente pero el mensaje actual es agresivo → espeja
+            prompt_sistema += (
+                "\n\nTONO DEL USUARIO EN ESTE MENSAJE: Está siendo grosero o agresivo. "
+                "Respóndele exactamente en el mismo nivel — groserías con groserías, "
+                "sin perder el hilo de la respuesta útil."
             )
 
-        # Inyectar vocabulario del usuario aprendido (por usuario)
+        # Inyectar estilo de slang del usuario (si aplica)
         vocab_hint = self.memory.get_vocabulario_hint(user_id=user_id)
         if vocab_hint:
             prompt_sistema += vocab_hint
