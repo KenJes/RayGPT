@@ -6,6 +6,7 @@ Autor: Axoloit / Kenneth Alcalá
 Versión: 3.0 (modular)
 """
 
+import json
 import tkinter as tk
 from tkinter import scrolledtext, filedialog
 import threading
@@ -16,6 +17,11 @@ from core.config import config_agente, AppConfig
 from core.ai_clients import OllamaClient, GitHubModelsClient, GroqClient
 from core.tools import GestorHerramientas
 from core.audio_handler import get_audio_handler
+from core.adapters import build_registry
+from core.agent_loop import AgentLoop, es_meta_compleja
+from core.agent_logger import AgentLogger
+from core.agent_memory import VectorMemory
+from core.approval import approval_manager, ApprovalStatus
 
 # ── AgentField connector (opcional) ───────────────────────────
 try:
@@ -53,6 +59,38 @@ class ChatGUI:
         self.google = cfg.google_client
         self.herramientas = GestorHerramientas(
             self.ollama, self.github, google=self.google, groq=self.groq_client
+        )
+
+        # Infraestructura agéntica
+        self.adapter_registry = build_registry(self.herramientas)
+        self.agent_logger = AgentLogger()
+        self.agent_memory = VectorMemory()
+
+        def _ai_chat_gui(messages, temperature=0.4, max_tokens=2000):
+            if self.groq_client and self.groq_client.client:
+                r = self.groq_client.chat(messages, temperature=temperature, max_tokens=max_tokens)
+                if r:
+                    return r
+            if self.github and self.github.client:
+                r = self.github.chat(messages, temperature=temperature, max_tokens=max_tokens)
+                if r:
+                    return r
+            prompt = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in messages)
+            return self.ollama.generate(prompt, temperature=temperature, max_tokens=max_tokens) or ""
+
+        # Callback de aprobación: muestra diálogo tkinter
+        def _on_approval_needed(req):
+            self.root.after(0, lambda: self._show_approval_dialog(req))
+
+        approval_manager.on_approval_needed = _on_approval_needed
+
+        self.agent_loop = AgentLoop(
+            registry=self.adapter_registry,
+            ai_chat_fn=_ai_chat_gui,
+            logger=self.agent_logger,
+            memory=self.agent_memory,
+            approval=approval_manager,
+            on_progress=lambda msg: self.root.after(0, self._mostrar_progreso, msg),
         )
 
         # Audio
@@ -254,7 +292,13 @@ class ChatGUI:
                 self._mostrar_respuesta(resp)
                 return
 
-            # Herramientas
+            # Ruta agéntica: metas complejas van al AgentLoop
+            if es_meta_compleja(mensaje):
+                resultado_agente = self.agent_loop.run(goal=mensaje)
+                self._mostrar_respuesta(resultado_agente["response"])
+                return
+
+            # Ruta clásica: herramientas simples
             af_del = _af_delegar if _AGENTFIELD_ENABLED else None
             af_dis = _af_disponible if _AGENTFIELD_ENABLED else None
             resultado = self.herramientas.procesar_mensaje(mensaje, af_delegar=af_del, af_disponible=af_dis)
@@ -293,6 +337,32 @@ class ChatGUI:
         if len(self.historial_chat) > 20:
             self.historial_chat = self.historial_chat[-20:]
         return respuesta
+
+    # ───── Agéntico: progreso y aprobación ───────────────────
+
+    def _mostrar_progreso(self, msg):
+        """Muestra un mensaje de progreso del agente en el chat."""
+        self.text_chat.config(state="normal")
+        self.text_chat.insert("end", f"\n⏳ {msg}\n", "assistant")
+        self.text_chat.config(state="disabled")
+        self.text_chat.see("end")
+        self.label_estado.config(text="🧠 Agente pensando...", fg="#ffa500")
+
+    def _show_approval_dialog(self, req):
+        """Muestra un diálogo tkinter para aprobar/rechazar una acción del agente."""
+        import tkinter.messagebox as mb
+        msg = (
+            f"El agente quiere ejecutar una acción que requiere aprobación:\n\n"
+            f"Acción: {req.action}\n"
+            f"Argumentos: {json.dumps(req.args, indent=2, ensure_ascii=False)[:300]}\n\n"
+            f"Razón: {req.reason[:200]}\n\n"
+            f"¿Aprobar esta acción?"
+        )
+        aprobado = mb.askyesno("Aprobación requerida", msg)
+        if aprobado:
+            approval_manager.approve(req.id)
+        else:
+            approval_manager.deny(req.id)
 
     # ───── Mostrar respuesta ──────────────────────────────────
 

@@ -47,6 +47,11 @@ from core.config import config_agente as config_agente_module
 from core.google_workspace_client import GoogleWorkspaceClient
 from core.metrics_tracker import MetricsTracker
 from core.audio_handler import get_audio_handler
+from core.adapters import build_registry
+from core.agent_loop import AgentLoop, es_meta_compleja
+from core.agent_logger import AgentLogger
+from core.agent_memory import VectorMemory
+from core.approval import approval_manager
 
 # ====================================
 # CONFIGURACIÓN DE FLASK
@@ -111,6 +116,36 @@ try:
     logger.info("✅ Agente Raymundo inicializado")
     logger.info(f"   • Personalidad: {config_agente.get('personalidad', {}).get('tono', 'desconocido')}")
     logger.info(f"   • Modelo Ollama: {config_agente.get('modelos', {}).get('ollama', {}).get('modelo', 'qwen2.5:7b')}")
+
+    # Inicializar infraestructura agéntica
+    adapter_registry = build_registry(gestor)
+
+    def _ai_chat_for_agent(messages, temperature=0.4, max_tokens=2000):
+        """Función de chat para el AgentLoop — usa la cadena de fallback."""
+        if groq and groq.client:
+            r = groq.chat(messages, temperature=temperature, max_tokens=max_tokens)
+            if r:
+                return r
+        if github and github.client:
+            r = github.chat(messages, temperature=temperature, max_tokens=max_tokens)
+            if r:
+                return r
+        # Ollama solo acepta prompt plano
+        prompt = "\n".join(
+            f"{m['role'].capitalize()}: {m['content']}" for m in messages
+        )
+        return ollama.generate(prompt, temperature=temperature, max_tokens=max_tokens) or ""
+
+    agent_logger = AgentLogger()
+    agent_memory = VectorMemory()
+    agent_loop = AgentLoop(
+        registry=adapter_registry,
+        ai_chat_fn=_ai_chat_for_agent,
+        logger=agent_logger,
+        memory=agent_memory,
+        approval=approval_manager,
+    )
+    logger.info("✅ Infraestructura agéntica inicializada (adapters, loop, memory, logger)")
     
 except Exception as e:
     logger.error(f"❌ Error inicializando Raymundo: {e}")
@@ -378,6 +413,50 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
         # Detectar si el usuario está siendo agresivo en ESTE mensaje (no persistente)
         usuario_agresivo = detectar_agresividad_usuario(mensaje_limpio)
 
+        # ─── RUTA AGÉNTICA: metas complejas van al AgentLoop ──────
+        if es_meta_compleja(mensaje_limpio):
+            logger.info(f"🧠 [{user_name or user_id}] Meta compleja detectada → AgentLoop")
+            try:
+                resultado_agente = agent_loop.run(
+                    goal=mensaje_limpio,
+                    user_name=user_name,
+                    user_id=user_id,
+                    tono_override=get_tono_usuario(user_id),
+                    usuario_agresivo=usuario_agresivo,
+                )
+                respuesta = resultado_agente["response"]
+                tiempo_respuesta = time.time() - tiempo_inicio
+
+                # Rastrear métricas
+                tokens_groq = groq.last_tokens_used if groq and groq.client else 0
+                tokens_gpt4o = github.last_tokens_used
+                tokens_ollama = ollama.last_tokens_used
+                modelo = "groq" if tokens_groq > 0 else "gpt4o" if tokens_gpt4o > 0 else "ollama"
+                metrics.track_request(
+                    tipo="agent_loop",
+                    tokens_used=tokens_groq or tokens_gpt4o or tokens_ollama,
+                    modelo=modelo,
+                    tiempo_respuesta=tiempo_respuesta,
+                    user_id=user_id,
+                )
+
+                logger.info(
+                    f"✅ AgentLoop completado — {resultado_agente['steps_taken']} pasos, "
+                    f"{len(respuesta)} chars, {tiempo_respuesta:.2f}s"
+                )
+                return jsonify({
+                    "respuesta": respuesta,
+                    "user_id": user_id,
+                    "agentic": True,
+                    "steps": resultado_agente["steps_taken"],
+                    "run_id": resultado_agente["run_id"],
+                })
+            except Exception as e:
+                logger.error(f"❌ Error en AgentLoop: {e}")
+                # Fallback al flujo clásico si el loop falla
+                logger.info("🔄 Fallback al flujo clásico...")
+
+        # ─── RUTA CLÁSICA: chat directo o herramientas simples ────
         # Procesar mensaje (detectar intención, aprender vocabulario internamente)
         resultado_herramienta = gestor.procesar_mensaje(
             mensaje_limpio,
@@ -558,6 +637,47 @@ def clear_history(user_id):
         return jsonify({
             "error": str(e)
         }), 500
+
+# ====================================
+# ENDPOINTS AGÉNTICOS
+# ====================================
+
+@app.route('/agent/approve/<request_id>', methods=['POST'])
+def approve_action(request_id):
+    """Aprueba una acción pendiente del agente."""
+    if approval_manager.approve(request_id):
+        return jsonify({"status": "approved", "request_id": request_id})
+    return jsonify({"error": "Solicitud no encontrada o ya resuelta"}), 404
+
+@app.route('/agent/deny/<request_id>', methods=['POST'])
+def deny_action(request_id):
+    """Rechaza una acción pendiente del agente."""
+    if approval_manager.deny(request_id):
+        return jsonify({"status": "denied", "request_id": request_id})
+    return jsonify({"error": "Solicitud no encontrada o ya resuelta"}), 404
+
+@app.route('/agent/pending', methods=['GET'])
+def pending_approvals():
+    """Lista solicitudes de aprobación pendientes."""
+    pending = approval_manager.get_pending()
+    return jsonify({
+        "pending": [
+            {
+                "id": r.id,
+                "action": r.action,
+                "args": r.args,
+                "reason": r.reason,
+                "created_at": r.created_at,
+            }
+            for r in pending
+        ]
+    })
+
+@app.route('/agent/logs', methods=['GET'])
+def agent_logs():
+    """Devuelve los últimos logs del agente."""
+    n = request.args.get('n', 20, type=int)
+    return jsonify({"logs": agent_logger.get_last_runs(n)})
 
 @app.route('/stats', methods=['GET'])
 def stats():
