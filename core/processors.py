@@ -28,10 +28,11 @@ class EmojiProcessor:
 
 
 class VisionProcessor:
-    """Procesa imágenes con GPT-4o Vision y OCR."""
+    """Procesa imágenes con GPT-4o Vision y OCR, con fallback a Groq Vision."""
 
-    def __init__(self, github_client):
+    def __init__(self, github_client, groq_client=None):
         self.github_client = github_client
+        self.groq_client = groq_client
         self.supported_formats = [".png", ".jpg", ".jpeg", ".gif", ".webp"]
 
     def encode_image(self, image_path):
@@ -83,7 +84,7 @@ class VisionProcessor:
         return tmp.name
 
     def _analyze_base64(self, b64_data: str, prompt: str) -> str:
-        """Envía imagen base64 a GPT-4o Vision."""
+        """Envía imagen base64 a GPT-4o Vision, con fallback a Groq Vision."""
         messages = [
             {
                 "role": "user",
@@ -96,7 +97,37 @@ class VisionProcessor:
                 ],
             }
         ]
-        return self.github_client.chat_with_images(messages, max_tokens=2000)
+        # Intento 1: GitHub Models (GPT-4o Vision)
+        result = self.github_client.chat_with_images(messages, max_tokens=2000)
+        if result and not str(result).startswith("❌"):
+            return result
+
+        # Intento 2: Groq Vision (llama-3.2-90b-vision-preview)
+        if self.groq_client and self.groq_client.client:
+            try:
+                groq_response = self.groq_client.client.chat.completions.create(
+                    model="llama-3.2-90b-vision-preview",
+                    messages=messages,
+                    temperature=0.3,
+                    max_tokens=2000,
+                )
+                if groq_response and groq_response.choices:
+                    return groq_response.choices[0].message.content
+            except Exception as e:
+                # Si 90b falla, intentar con 11b
+                try:
+                    groq_response = self.groq_client.client.chat.completions.create(
+                        model="llama-3.2-11b-vision-preview",
+                        messages=messages,
+                        temperature=0.3,
+                        max_tokens=2000,
+                    )
+                    if groq_response and groq_response.choices:
+                        return groq_response.choices[0].message.content
+                except Exception:
+                    pass
+
+        return result or "❌ No se pudo analizar la imagen (todos los proveedores fallaron)"
 
 
 class DocumentProcessor:

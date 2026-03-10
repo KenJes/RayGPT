@@ -25,7 +25,7 @@ class GestorHerramientas:
         self.detector = DetectorIntenciones()
         self.detector_temporal = DetectorTemporalidad()
         self.detector_idioma = DetectorIdioma()
-        self.vision = VisionProcessor(github)
+        self.vision = VisionProcessor(github, groq)
         self.docs = DocumentProcessor()
         self.memory = MemorySystem()
         self.scraper = WebScraper()

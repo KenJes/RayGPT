@@ -7,7 +7,7 @@ import os
 import requests
 
 from azure.ai.inference import ChatCompletionsClient
-from azure.ai.inference.models import SystemMessage, UserMessage
+from azure.ai.inference.models import SystemMessage, UserMessage, ImageContentItem, ImageUrl, TextContentItem
 from azure.core.credentials import AzureKeyCredential
 from groq import Groq
 
@@ -107,32 +107,43 @@ class GitHubModelsClient:
             print(f"Error GitHub Models: {error_msg}")
             return None
 
-    def chat_with_images(self, messages, temperature=0.7, max_tokens=1000):
+    def chat_with_images(self, messages, temperature=0.7, max_tokens=2000):
+        """Envía mensajes multimodales (texto + imagen) usando el Azure AI SDK."""
         if not self.client:
             return "❌ GitHub Models no configurado"
         try:
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.token}",
-            }
-            payload = {
-                "messages": messages,
-                "model": self.model,
-                "temperature": temperature,
-                "max_tokens": max_tokens,
-            }
-            response = requests.post(
-                f"{self.endpoint}/chat/completions",
-                headers=headers,
-                json=payload,
-                timeout=60,
+            formatted = []
+            for msg in messages:
+                if msg["role"] == "system":
+                    formatted.append(SystemMessage(content=msg["content"]))
+                elif msg["role"] == "user":
+                    content = msg["content"]
+                    # Si content es una lista (multimodal), convertir a SDK types
+                    if isinstance(content, list):
+                        items = []
+                        for part in content:
+                            if part.get("type") == "text":
+                                items.append(TextContentItem(text=part["text"]))
+                            elif part.get("type") == "image_url":
+                                url = part["image_url"]["url"]
+                                items.append(ImageContentItem(image_url=ImageUrl(url=url)))
+                        formatted.append(UserMessage(content=items))
+                    else:
+                        formatted.append(UserMessage(content=content))
+
+            response = self.client.complete(
+                messages=formatted,
+                model=self.model,
+                temperature=temperature,
+                max_tokens=max_tokens,
             )
-            if response.status_code == 200:
-                return response.json()["choices"][0]["message"]["content"]
-            if response.status_code == 429:
-                return "❌ Rate limit alcanzado. Intenta en unos minutos."
-            return f"❌ Error en API: {response.status_code}"
+            if hasattr(response, "usage"):
+                self.last_tokens_used = response.usage.total_tokens
+            return response.choices[0].message.content
         except Exception as e:
+            error_msg = str(e)
+            if "429" in error_msg or "RateLimitReached" in error_msg:
+                return "❌ Rate limit alcanzado. Intenta en unos minutos."
             return f"❌ Error procesando imagen: {e}"
 
 
