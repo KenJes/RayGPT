@@ -274,10 +274,10 @@ class CreateSpreadsheetAdapter(ToolAdapter):
 
 
 class AnalyzeImageAdapter(ToolAdapter):
-    """Analiza una imagen con GPT-4o Vision."""
+    """Analiza una imagen con GPT-4o Vision (archivo local o base64)."""
 
     name = "analyze_image"
-    description = "Analyze an image using GPT-4o Vision."
+    description = "Analyze an image using GPT-4o Vision. Accepts 'path' (local file) or 'base64' (image data)."
     requires_approval = False
 
     def __init__(self, vision_processor):
@@ -285,14 +285,19 @@ class AnalyzeImageAdapter(ToolAdapter):
 
     def execute(self, args: dict) -> dict:
         path = args.get("path", "")
+        b64 = args.get("base64", "")
         prompt = args.get("prompt", "Describe esta imagen en detalle.")
-        if not path:
-            return {"success": False, "output": None, "error": "Falta el argumento 'path'."}
-        if not Path(path).exists():
-            return {"success": False, "output": None, "error": f"Imagen no encontrada: {path}"}
         try:
-            resultado = self.vision.analyze_image(path, prompt)
-            return {"success": True, "output": resultado, "error": None}
+            if b64:
+                resultado = self.vision.analyze_image_base64(b64, prompt)
+            elif path:
+                if not Path(path).exists():
+                    return {"success": False, "output": None, "error": f"Imagen no encontrada: {path}"}
+                resultado = self.vision.analyze_image(path, prompt)
+            else:
+                return {"success": False, "output": None, "error": "Falta 'path' o 'base64'."}
+            success = resultado and not str(resultado).startswith("❌")
+            return {"success": success, "output": resultado, "error": None if success else resultado}
         except Exception as e:
             return {"success": False, "output": None, "error": str(e)}
 
@@ -318,6 +323,58 @@ class AnalyzeDocumentAdapter(ToolAdapter):
             if doc["success"]:
                 return {"success": True, "output": doc["content"][:5000], "error": None}
             return {"success": False, "output": None, "error": "No se pudo procesar el documento."}
+        except Exception as e:
+            return {"success": False, "output": None, "error": str(e)}
+
+
+# ═══════════════════════════════════════════════════════════════
+# Evaluador de CV / RH
+# ═══════════════════════════════════════════════════════════════
+
+class EvaluateCVAdapter(ToolAdapter):
+    """Evalúa un CV/currículum y recomienda puestos ideales."""
+
+    name = "evaluate_cv"
+    description = (
+        "Evaluate a CV/resume text and recommend the best role for the candidate. "
+        "Args: 'cv_text' (extracted text from CV), 'context' (optional company context/needs)."
+    )
+    requires_approval = False
+
+    def __init__(self, ai_query_fn):
+        self.ai_query_fn = ai_query_fn
+
+    def execute(self, args: dict) -> dict:
+        cv_text = args.get("cv_text", "")
+        context = args.get("context", "")
+        if not cv_text:
+            return {"success": False, "output": None, "error": "Falta el argumento 'cv_text'."}
+
+        prompt = f"""Eres un experto de Recursos Humanos de Axoloit, una startup mexicana de tecnología.
+
+INSTRUCCIONES:
+Analiza el siguiente CV/currículum y proporciona una evaluación profesional completa.
+
+CV DEL CANDIDATO:
+{cv_text[:3000]}
+
+{f"CONTEXTO DE LA EMPRESA / NECESIDADES:{chr(10)}{context}" if context else ""}
+
+RESPONDE CON:
+1. **Datos del candidato**: Nombre, contacto, ubicación
+2. **Resumen profesional**: Perfil general en 2-3 líneas
+3. **Fortalezas clave**: Las 5 habilidades/experiencias más fuertes
+4. **Áreas de oportunidad**: Qué le falta o debería desarrollar
+5. **Puestos recomendados**: Los 3 mejores puestos donde este candidato rendiría más, ordenados por fit
+6. **Nivel sugerido**: Junior / Mid / Senior / Lead
+7. **Rango salarial estimado (MXN)**: Basado en mercado mexicano
+8. **Veredicto final**: Contratar / Considerar / Pasar — con justificación
+
+Sé directo, honesto y usa español mexicano natural. Si el CV tiene áreas débiles, dilo sin rodeos."""
+
+        try:
+            respuesta = self.ai_query_fn(prompt, 0.5, 2000)
+            return {"success": True, "output": respuesta, "error": None}
         except Exception as e:
             return {"success": False, "output": None, "error": str(e)}
 
@@ -374,5 +431,6 @@ def build_registry(gestor) -> AdapterRegistry:
     registry.register(CreateSpreadsheetAdapter(gestor))
     registry.register(AnalyzeImageAdapter(gestor.vision))
     registry.register(AnalyzeDocumentAdapter(gestor.docs))
+    registry.register(EvaluateCVAdapter(gestor._consultar_ia))
 
     return registry

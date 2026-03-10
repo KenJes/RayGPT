@@ -259,23 +259,58 @@ class ChatGUI:
         mensaje = self.entry_mensaje.get("1.0", "end-1c").strip()
         if not mensaje or self.procesando:
             return
+
+        archivo_path = None
         if self.archivo_adjunto:
-            mensaje = f"{mensaje}\n\nArchivo: {self.archivo_adjunto}"
+            archivo_path = self.archivo_adjunto
             self.archivo_adjunto = None
+            self.label_estado.config(text="⏳ Procesando imagen...")
 
         self.entry_mensaje.delete("1.0", "end")
         self.text_chat.config(state="normal")
         self.text_chat.insert("end", "\n\nTú\n", "user_label")
-        self.text_chat.insert("end", f"{mensaje}\n", "user")
+        display_msg = mensaje
+        if archivo_path:
+            display_msg += f"\n📎 {Path(archivo_path).name}"
+        self.text_chat.insert("end", f"{display_msg}\n", "user")
         self.text_chat.config(state="disabled")
         self.text_chat.see("end")
 
         self.procesando = True
         self.label_estado.config(text="⏳ Procesando...")
-        threading.Thread(target=self._procesar_mensaje, args=(mensaje,), daemon=True).start()
+        threading.Thread(
+            target=self._procesar_mensaje, args=(mensaje, archivo_path), daemon=True
+        ).start()
 
-    def _procesar_mensaje(self, mensaje):
+    def _procesar_mensaje(self, mensaje, archivo_adjunto=None):
         try:
+            # Si hay imagen adjunta, extraer texto con Vision OCR
+            if archivo_adjunto:
+                ext = Path(archivo_adjunto).suffix.lower()
+                if ext in [".png", ".jpg", ".jpeg", ".gif", ".webp"]:
+                    self.root.after(0, lambda: self.label_estado.config(text="📸 Leyendo imagen..."))
+                    texto_extraido = self.herramientas.vision.extract_text_from_image(archivo_adjunto)
+                    if texto_extraido and not texto_extraido.startswith("❌"):
+                        mensaje = (
+                            f"{mensaje}\n\n"
+                            f"[CONTENIDO EXTRAÍDO DE LA IMAGEN ADJUNTA]:\n"
+                            f"{texto_extraido}"
+                        )
+                    else:
+                        mensaje = f"{mensaje}\n\nArchivo: {archivo_adjunto}"
+                elif ext in [".pdf", ".txt", ".md"]:
+                    doc = self.herramientas.docs.process_document(archivo_adjunto)
+                    if doc["success"]:
+                        mensaje = (
+                            f"{mensaje}\n\n"
+                            f"[CONTENIDO DEL DOCUMENTO ADJUNTO ({Path(archivo_adjunto).name})]:\n"
+                            f"{doc['content'][:3000]}"
+                        )
+                    else:
+                        mensaje = f"{mensaje}\n\nArchivo: {archivo_adjunto}"
+                else:
+                    mensaje = f"{mensaje}\n\nArchivo: {archivo_adjunto}"
+
             # Cambio de personalidad
             if mensaje.lower() in ["/puteado", "/raymundo", "/ray", "/malo"]:
                 resp = config_agente.cambiar_personalidad("puteado")

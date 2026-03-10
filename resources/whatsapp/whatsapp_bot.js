@@ -66,16 +66,22 @@ client.on('auth_failure', msg => {
   console.error('❌ Error de autenticación en WhatsApp:', msg);
 });
 
-async function enviarMensajeAlServidor(texto, userId, userName) {
+async function enviarMensajeAlServidor(texto, userId, userName, imageBase64 = null) {
   const payload = {
     mensaje: texto,
     user_id: userId,
     user_name: userName || userId
   };
 
+  if (imageBase64) {
+    payload.image_base64 = imageBase64;
+  }
+
   const { data } = await axios.post(CHAT_ENDPOINT, payload, {
     timeout: 60_000,
-    headers: { 'Content-Type': 'application/json' }
+    headers: { 'Content-Type': 'application/json' },
+    maxContentLength: 50 * 1024 * 1024,
+    maxBodyLength: 50 * 1024 * 1024,
   });
 
   return data;
@@ -109,6 +115,31 @@ client.on('message_create', async message => {
     console.log(`🎤 Mensaje de voz recibido - fromMe: ${message.fromMe}, from: ${message.from}`);
     console.log(`⚠️  Mensaje de voz ignorado (usa comandos de texto para activar el bot)`);
     return;
+  }
+
+  // ───── IMAGEN / DOCUMENTO adjunto ─────────────────────────────
+  let imageBase64 = null;
+  if (message.hasMedia && (message.type === 'image' || message.type === 'document' || message.type === 'sticker')) {
+    // Solo procesar si el caption (texto) trae un comando válido
+    const caption = (message.body || '').trim();
+    const comandosPermitidos = ['/raymundo', '/rai', '/amigable', '/puteado', '/ray', '/putedo', '/friendly'];
+    const tieneComando = caption && comandosPermitidos.some(cmd => caption.toLowerCase().startsWith(cmd));
+
+    if (tieneComando) {
+      try {
+        console.log(`📸 [${BOT_INSTANCE_ID}] Descargando media (${message.type})...`);
+        const media = await message.downloadMedia();
+        if (media && media.data) {
+          imageBase64 = media.data; // ya viene en base64
+          console.log(`✅ Media descargada: ${media.mimetype}, ${Math.round(media.data.length * 3 / 4 / 1024)} KB`);
+        }
+      } catch (err) {
+        console.error(`⚠️  Error descargando media: ${err.message}`);
+      }
+    } else {
+      console.log(`⚠️  Media sin comando válido, ignorado.`);
+      return;
+    }
   }
 
   if (!message.body || !message.body.trim()) {
@@ -174,7 +205,7 @@ client.on('message_create', async message => {
 
   try {
     await message.reply('🤖 Procesando tu mensaje, dame un momento...');
-    const respuesta = await enviarMensajeAlServidor(texto, userId, userName);
+    const respuesta = await enviarMensajeAlServidor(texto, userId, userName, imageBase64);
 
     if (respuesta.respuesta) {
       await client.sendMessage(chatId, respuesta.respuesta);

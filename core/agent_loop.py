@@ -69,6 +69,10 @@ Responde SIEMPRE con un JSON válido con esta estructura exacta:
 10. Máximo 10 pasos por meta. Si necesitas más, para y pide guía al usuario.
 11. Si la meta es simple (una pregunta directa, un saludo), responde con `stop: true` de inmediato
     usando la herramienta `call_api` o directamente con `"tool": "none"`.
+12. Si el mensaje incluye "[CONTENIDO EXTRAÍDO DE LA IMAGEN ADJUNTA]", el texto después de esa
+    etiqueta es texto OCR extraído de una imagen/foto enviada por el usuario. ÚSALO directamente
+    como si fueras leyendo el documento — NO necesitas volver a analizar la imagen.
+13. Para evaluar CVs, usa la herramienta `evaluate_cv` pasando el texto del CV como `cv_text`.
 
 ### CONTEXTO PREVIO (RAG)
 
@@ -446,6 +450,17 @@ _AGENTIC_PATTERNS = [
     r"\bcontratar?\s+\w",
     r"\bhaz\s+un\s+(?:an[aá]lisis|reporte|resumen|listado)\b",
     r"\bqu[eé]\s+(?:rol|cargo|puesto|personal|equipo)\s+necesita\w*\b",
+    # CV / Recursos Humanos
+    r"\bcv\b",
+    r"\bcurr[ií]cul(?:um|o)\b",
+    r"\beval[uú]a(?:r)?\s+(?:al?\s+)?(?:candidato|perfil|cv|curr[ií]cul)\b",
+    r"\bqu[eé]\s+puesto\s+(?:puede|le\s+queda|ocupar)\b",
+    r"\b(?:imagen|foto)\s+(?:con|del?)\s+(?:el\s+)?cv\b",
+    r"\bcontratar\w*\b.*\b(?:posici[oó]n|puesto|rol)\b",
+    r"\brh\b|\brecursos\s+humanos\b",
+    r"\bfortalezas?\b.*\bdebilidades?\b",
+    # Imagen adjunta con análisis
+    r"\bCONTENIDO EXTRAÍDO DE LA IMAGEN\b",
 ]
 
 # Patrones de chat simple (saludos, preguntas directas, etc.)

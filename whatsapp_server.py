@@ -296,6 +296,7 @@ def chat():
         mensaje = data['mensaje'].strip()
         user_id = data.get('user_id', 'default')  # ID del usuario (opcional)
         user_name = data.get('user_name', '').strip() or None  # Nombre del contacto WA
+        image_base64 = data.get('image_base64')  # Imagen adjunta en base64 (opcional)
 
         # Guardar/actualizar nombre conocido del contacto
         if user_name and user_name != user_id:
@@ -412,6 +413,24 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
 
         # Detectar si el usuario está siendo agresivo en ESTE mensaje (no persistente)
         usuario_agresivo = detectar_agresividad_usuario(mensaje_limpio)
+
+        # ─── IMAGEN ADJUNTA: extraer texto con Vision OCR ─────────
+        texto_imagen_extraido = None
+        if image_base64:
+            logger.info(f"📸 [{user_name or user_id}] Imagen adjunta recibida, extrayendo texto...")
+            try:
+                texto_imagen_extraido = gestor.vision.extract_text_from_base64(image_base64)
+                if texto_imagen_extraido and not texto_imagen_extraido.startswith("❌"):
+                    logger.info(f"📝 Texto extraído de imagen: {len(texto_imagen_extraido)} chars")
+                    mensaje_limpio = (
+                        f"{mensaje_limpio}\n\n"
+                        f"[CONTENIDO EXTRAÍDO DE LA IMAGEN ADJUNTA]:\n"
+                        f"{texto_imagen_extraido}"
+                    )
+                else:
+                    logger.warning(f"⚠️ No se pudo extraer texto de la imagen: {texto_imagen_extraido}")
+            except Exception as e:
+                logger.error(f"❌ Error extrayendo texto de imagen: {e}")
 
         # ─── RUTA AGÉNTICA: metas complejas van al AgentLoop ──────
         if es_meta_compleja(mensaje_limpio):

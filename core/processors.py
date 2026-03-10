@@ -1,11 +1,14 @@
 """
-Procesadores — Visión, documentos y emojis.
+Procesadores — Visión, documentos, emojis y OCR.
 """
 
 import base64
+import io
+import tempfile
 from pathlib import Path
 
 import emoji
+from PIL import Image
 
 
 class EmojiProcessor:
@@ -25,7 +28,7 @@ class EmojiProcessor:
 
 
 class VisionProcessor:
-    """Procesa imágenes con GPT-4o Vision."""
+    """Procesa imágenes con GPT-4o Vision y OCR."""
 
     def __init__(self, github_client):
         self.github_client = github_client
@@ -40,21 +43,60 @@ class VisionProcessor:
             return "❌ Imagen no encontrada"
         try:
             b64 = self.encode_image(image_path)
-            messages = [
-                {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": prompt},
-                        {
-                            "type": "image_url",
-                            "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
-                        },
-                    ],
-                }
-            ]
-            return self.github_client.chat_with_images(messages, max_tokens=1000)
+            return self._analyze_base64(b64, prompt)
         except Exception as e:
             return f"❌ Error: {e}"
+
+    def analyze_image_base64(self, b64_data: str, prompt: str = "Describe esta imagen en detalle") -> str:
+        """Analiza una imagen desde datos base64 (sin archivo en disco)."""
+        try:
+            return self._analyze_base64(b64_data, prompt)
+        except Exception as e:
+            return f"❌ Error: {e}"
+
+    def extract_text_from_image(self, image_path: str) -> str:
+        """Extrae texto de una imagen usando GPT-4o Vision como OCR inteligente."""
+        prompt = (
+            "Extrae TODO el texto visible en esta imagen, exactamente como aparece. "
+            "Mantén el formato, saltos de línea y estructura. "
+            "Si es un CV/currículum, incluye TODOS los datos: nombre, experiencia, "
+            "educación, habilidades, certificaciones, idiomas, contacto."
+        )
+        return self.analyze_image(image_path, prompt)
+
+    def extract_text_from_base64(self, b64_data: str) -> str:
+        """Extrae texto de una imagen base64 usando GPT-4o Vision como OCR."""
+        prompt = (
+            "Extrae TODO el texto visible en esta imagen, exactamente como aparece. "
+            "Mantén el formato, saltos de línea y estructura. "
+            "Si es un CV/currículum, incluye TODOS los datos: nombre, experiencia, "
+            "educación, habilidades, certificaciones, idiomas, contacto."
+        )
+        return self.analyze_image_base64(b64_data, prompt)
+
+    def save_base64_to_temp(self, b64_data: str, suffix: str = ".jpg") -> str:
+        """Guarda datos base64 en un archivo temporal y devuelve la ruta."""
+        img_bytes = base64.b64decode(b64_data)
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=suffix, dir=str(Path("output")))
+        tmp.write(img_bytes)
+        tmp.close()
+        return tmp.name
+
+    def _analyze_base64(self, b64_data: str, prompt: str) -> str:
+        """Envía imagen base64 a GPT-4o Vision."""
+        messages = [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{b64_data}"},
+                    },
+                ],
+            }
+        ]
+        return self.github_client.chat_with_images(messages, max_tokens=2000)
 
 
 class DocumentProcessor:
