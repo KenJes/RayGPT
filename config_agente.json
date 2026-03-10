@@ -11,8 +11,9 @@
   },
   "modelos": {
     "ollama": {
-      "temperatura_default": 0.8,
-      "temperatura_optimizacion": 0.3
+      "modelo": "llama3.1:8b",
+      "temperatura_default": 0.6,
+      "temperatura_optimizacion": 0.2
     },
     "github_models": {
       "temperatura": 0.7

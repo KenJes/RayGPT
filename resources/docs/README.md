@@ -189,7 +189,7 @@ Google Workspace APIs
 ```
 
 **Componentes:**
-- **Ollama**: Procesamiento local con GPU (qwen2.5:7b)
+- **Ollama**: Procesamiento local con GPU (llama3.1:8b)
 - **GPT-4o**: Respuestas avanzadas cloud (GitHub Models)
 - **Vision AI**: Analisis de imagenes
 - **Google Workspace**: Docs, Sheets, Slides, Drive, Calendar
@@ -440,7 +440,7 @@ Agentes/
 Si algo no funciona:
 
 1. Revisa logs en ambas terminales (Python y Node.js)
-2. Verifica Ollama: `ollama list` debe mostrar `qwen2.5:7b`
+2. Verifica Ollama: `ollama list` debe mostrar `llama3.1:8b`
 3. Verifica conexion: Internet estable requerida
 4. Reinicia servicios: Ctrl+C y volver a ejecutar
 

@@ -104,7 +104,7 @@ class AppConfig:
 
     def __init__(self):
         self.ollama_url = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-        self.ollama_model = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b")
+        self.ollama_model = os.environ.get("OLLAMA_MODEL", "llama3.1:8b")
         self.github_token = os.environ.get("GITHUB_TOKEN")
 
         creds_env = os.environ.get("GOOGLE_CREDENTIALS_FILE")

@@ -115,7 +115,7 @@ try:
     
     logger.info("✅ Agente Raymundo inicializado")
     logger.info(f"   • Personalidad: {config_agente.get('personalidad', {}).get('tono', 'desconocido')}")
-    logger.info(f"   • Modelo Ollama: {config_agente.get('modelos', {}).get('ollama', {}).get('modelo', 'qwen2.5:7b')}")
+    logger.info(f"   • Modelo Ollama: {config_agente.get('modelos', {}).get('ollama', {}).get('modelo', 'llama3.1:8b')}")
 
     # Inicializar infraestructura agéntica
     adapter_registry = build_registry(gestor)

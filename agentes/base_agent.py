@@ -32,7 +32,7 @@ from core.config import config_agente  # noqa: E402
 
 # ── URLs / credenciales ───────────────────────────────────────
 OLLAMA_URL   = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b")
+OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.1:8b")
 GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 

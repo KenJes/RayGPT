@@ -95,7 +95,7 @@ Un agente IA es un sistema autónomo que:
 │         APIs EXTERNAS                        │
 │  • GitHub Models (GPT-4o)                    │
 │  • Google Workspace APIs                    │
-│  • Ollama (qwen2.5:7b local)                │
+│  • Ollama (llama3.1:8b local)                │
 └──────────────────────────────────────────────┘
 ```
 
@@ -191,7 +191,7 @@ print(response.choices[0].message.content)
 #### **Ollama (Local LLM)**
 ```bash
 # ¿Por qué local? Privacidad + Sin costos API
-ollama run qwen2.5:7b
+ollama run llama3.1:8b
 ```
 
 **Ventajas:**
