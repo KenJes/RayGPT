@@ -1,5 +1,5 @@
 """
-Procesadores — Visión, documentos, emojis y OCR.
+Procesadores — Visión, documentos, emojis y OCR local (Tesseract).
 """
 
 import base64
@@ -8,7 +8,13 @@ import tempfile
 from pathlib import Path
 
 import emoji
-from PIL import Image
+import pytesseract
+from PIL import Image, ImageEnhance, ImageFilter
+
+# Ruta del binario de Tesseract en Windows
+_TESSERACT_PATH = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+if Path(_TESSERACT_PATH).exists():
+    pytesseract.pytesseract.tesseract_cmd = _TESSERACT_PATH
 
 
 class EmojiProcessor:
@@ -28,12 +34,14 @@ class EmojiProcessor:
 
 
 class VisionProcessor:
-    """Procesa imágenes con GPT-4o Vision y OCR, con fallback a Groq Vision."""
+    """OCR local con Tesseract + fallback a APIs de Vision si están disponibles."""
 
-    def __init__(self, github_client, groq_client=None):
+    def __init__(self, github_client=None, groq_client=None):
         self.github_client = github_client
         self.groq_client = groq_client
         self.supported_formats = [".png", ".jpg", ".jpeg", ".gif", ".webp"]
+
+    # ─── Métodos públicos ─────────────────────────────────────
 
     def encode_image(self, image_path):
         with open(image_path, "rb") as f:
@@ -49,31 +57,29 @@ class VisionProcessor:
             return f"❌ Error: {e}"
 
     def analyze_image_base64(self, b64_data: str, prompt: str = "Describe esta imagen en detalle") -> str:
-        """Analiza una imagen desde datos base64 (sin archivo en disco)."""
+        """Analiza una imagen desde datos base64."""
         try:
             return self._analyze_base64(b64_data, prompt)
         except Exception as e:
             return f"❌ Error: {e}"
 
     def extract_text_from_image(self, image_path: str) -> str:
-        """Extrae texto de una imagen usando GPT-4o Vision como OCR inteligente."""
-        prompt = (
-            "Extrae TODO el texto visible en esta imagen, exactamente como aparece. "
-            "Mantén el formato, saltos de línea y estructura. "
-            "Si es un CV/currículum, incluye TODOS los datos: nombre, experiencia, "
-            "educación, habilidades, certificaciones, idiomas, contacto."
-        )
-        return self.analyze_image(image_path, prompt)
+        """Extrae texto de una imagen. Usa Tesseract local."""
+        if not Path(image_path).exists():
+            return "❌ Imagen no encontrada"
+        try:
+            img = Image.open(image_path)
+            return self._ocr_local(img)
+        except Exception as e:
+            return f"❌ Error OCR: {e}"
 
     def extract_text_from_base64(self, b64_data: str) -> str:
-        """Extrae texto de una imagen base64 usando GPT-4o Vision como OCR."""
-        prompt = (
-            "Extrae TODO el texto visible en esta imagen, exactamente como aparece. "
-            "Mantén el formato, saltos de línea y estructura. "
-            "Si es un CV/currículum, incluye TODOS los datos: nombre, experiencia, "
-            "educación, habilidades, certificaciones, idiomas, contacto."
-        )
-        return self.analyze_image_base64(b64_data, prompt)
+        """Extrae texto de una imagen base64. Usa Tesseract local."""
+        try:
+            img = self._b64_to_pil(b64_data)
+            return self._ocr_local(img)
+        except Exception as e:
+            return f"❌ Error OCR: {e}"
 
     def save_base64_to_temp(self, b64_data: str, suffix: str = ".jpg") -> str:
         """Guarda datos base64 en un archivo temporal y devuelve la ruta."""
@@ -83,8 +89,52 @@ class VisionProcessor:
         tmp.close()
         return tmp.name
 
+    # ─── OCR local (Tesseract) ────────────────────────────────
+
+    def _ocr_local(self, img: Image.Image) -> str:
+        """OCR local con Tesseract. Preprocesa la imagen para mejorar precisión."""
+        # Preprocesamiento para mejorar OCR
+        processed = self._preprocess_for_ocr(img)
+
+        # Extraer texto con Tesseract (español + inglés)
+        text = pytesseract.image_to_string(processed, lang="spa+eng", config="--psm 6")
+        text = text.strip()
+
+        if not text:
+            # Reintentar con diferente modo de segmentación
+            text = pytesseract.image_to_string(processed, lang="spa+eng", config="--psm 3")
+            text = text.strip()
+
+        if not text:
+            return "❌ No se detectó texto en la imagen"
+
+        return text
+
+    def _preprocess_for_ocr(self, img: Image.Image) -> Image.Image:
+        """Preprocesa imagen para mejorar la precisión del OCR."""
+        # Convertir a escala de grises
+        if img.mode != "L":
+            img = img.convert("L")
+
+        # Escalar si es muy pequeña (Tesseract funciona mejor con imágenes grandes)
+        w, h = img.size
+        if w < 1000:
+            scale = 1000 / w
+            img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+
+        # Aumentar contraste
+        enhancer = ImageEnhance.Contrast(img)
+        img = enhancer.enhance(2.0)
+
+        # Aumentar nitidez
+        img = img.filter(ImageFilter.SHARPEN)
+
+        return img
+
+    # ─── Vision API (fallback opcional) ───────────────────────
+
     def _analyze_base64(self, b64_data: str, prompt: str) -> str:
-        """Envía imagen base64 a GPT-4o Vision, con fallback a Groq Vision."""
+        """Intenta APIs de Vision si están disponibles; si no, OCR local."""
         messages = [
             {
                 "role": "user",
@@ -97,37 +147,38 @@ class VisionProcessor:
                 ],
             }
         ]
+
         # Intento 1: GitHub Models (GPT-4o Vision)
-        result = self.github_client.chat_with_images(messages, max_tokens=2000)
-        if result and not str(result).startswith("❌"):
-            return result
+        if self.github_client and self.github_client.client:
+            result = self.github_client.chat_with_images(messages, max_tokens=2000)
+            if result and not str(result).startswith("❌"):
+                return result
 
-        # Intento 2: Groq Vision (llama-3.2-90b-vision-preview)
+        # Intento 2: Groq Vision
         if self.groq_client and self.groq_client.client:
-            try:
-                groq_response = self.groq_client.client.chat.completions.create(
-                    model="llama-3.2-90b-vision-preview",
-                    messages=messages,
-                    temperature=0.3,
-                    max_tokens=2000,
-                )
-                if groq_response and groq_response.choices:
-                    return groq_response.choices[0].message.content
-            except Exception as e:
-                # Si 90b falla, intentar con 11b
+            for model in ("llama-3.2-90b-vision-preview", "llama-3.2-11b-vision-preview"):
                 try:
-                    groq_response = self.groq_client.client.chat.completions.create(
-                        model="llama-3.2-11b-vision-preview",
-                        messages=messages,
-                        temperature=0.3,
-                        max_tokens=2000,
+                    resp = self.groq_client.client.chat.completions.create(
+                        model=model, messages=messages, temperature=0.3, max_tokens=2000,
                     )
-                    if groq_response and groq_response.choices:
-                        return groq_response.choices[0].message.content
+                    if resp and resp.choices:
+                        return resp.choices[0].message.content
                 except Exception:
-                    pass
+                    continue
 
-        return result or "❌ No se pudo analizar la imagen (todos los proveedores fallaron)"
+        # Intento 3: OCR local con Tesseract (siempre disponible)
+        try:
+            img = self._b64_to_pil(b64_data)
+            return self._ocr_local(img)
+        except Exception as e:
+            return f"❌ Error OCR local: {e}"
+
+    # ─── Utilidades ───────────────────────────────────────────
+
+    def _b64_to_pil(self, b64_data: str) -> Image.Image:
+        """Convierte base64 a imagen PIL."""
+        img_bytes = base64.b64decode(b64_data)
+        return Image.open(io.BytesIO(img_bytes))
 
 
 class DocumentProcessor:
