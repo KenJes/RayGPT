@@ -305,18 +305,16 @@ Sin markdown extra, sin explicaciones fuera del JSON."""
         resultado = self.scraper.scrape(url)
         if not resultado["success"]:
             return f"❌ {resultado['error']}"
+        contenido = resultado['contenido'] or resultado.get('descripcion') or "(sin contenido extraído)"
         prompt = (
             f"Analiza esta página web:\n"
             f"Título: {resultado['titulo']}\nURL: {resultado['url']}\n\n"
-            f"Contenido:\n{resultado['contenido'][:1500]}\n\n"
-            f"Pregunta: {pregunta}\n\nResponde claro y conciso."
+            f"Contenido:\n{contenido[:1500]}\n\n"
+            f"Pregunta: {pregunta}\n\nResponde claro y conciso en español."
         )
-        respuesta = self.github.chat(
-            [{"role": "user", "content": prompt}],
-            temperature=0.7,
-            max_tokens=500,
-        )
-        return f"🌐 **{resultado['titulo']}**\n\n{respuesta}"
+        respuesta = self._consultar_ia(prompt, 0.7, 500)
+        titulo = resultado['titulo'] or url
+        return f"🌐 **{titulo}**\n\n{respuesta}"
 
     # ───── Chat híbrido (Smart Routing) ────────────────────────
 

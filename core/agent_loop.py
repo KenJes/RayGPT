@@ -422,13 +422,30 @@ _AGENTIC_PATTERNS = [
     r"\bcrea(?:r|me)?\b.*\b(?:presentaci[oó]n|documento|hoja|excel|archivo|reporte)\b",
     r"\bbusca(?:r|me)?\b.*\b(?:en (?:la )?web|internet|google|url)\b",
     r"\banaliza(?:r|me)?\b.*\b(?:imagen|foto|documento|pdf|archivo)\b",
-    r"\bescribe?\b.*\b(?:archivo|código|script)\b",
+    r"\bescribe?\b.*\b(?:archivo|c[oó]digo|script)\b",
     r"\bejecutar?\b.*\b(?:comando|shell|terminal)\b",
     r"\binvestiga(?:r|me)?\b",
     r"\bplanifica(?:r|me)?\b",
-    r"\bgenera(?:r|me)?\b.*\b(?:reporte|informe|análisis|resumen)\b",
+    r"\bgenera(?:r|me)?\b.*\b(?:reporte|informe|an[aá]lisis|resumen)\b",
     r"\bpaso a paso\b",
     r"\bprimero\b.*\bluego\b",
+    # Evaluación de sitios web / URLs
+    r"\bevalú[ao]r?\b",
+    r"\b(?:revisar?|analizar?)\b.*\b(?:sitio|p[aá]gina|web|portal|empresa)\b",
+    r"\b(?:sitio|p[aá]gina|web)\b.*\b(?:evalú|revis|analiz)\b",
+    r"\b(?:http|www)\b",
+    r"\b\w{3,30}\.(?:com|mx|org|net|io|co)\b",
+    # Listas y recomendaciones
+    r"\bdame?\s+(?:una\s+)?lista\b",
+    r"\bhaz(?:me)?\s+(?:una\s+)?lista\b",
+    r"\bmuéstrame\s+(?:la\s+)?lista\b",
+    r"\blista\s+de\s+\w",
+    r"\bqué\s+puestos?\b",
+    r"\bpuestos?\s+(?:que\s+)?necesi\w+\b",
+    r"\brecomienda\w*\b",
+    r"\bcontratar?\s+\w",
+    r"\bhaz\s+un\s+(?:an[aá]lisis|reporte|resumen|listado)\b",
+    r"\bqu[eé]\s+(?:rol|cargo|puesto|personal|equipo)\s+necesita\w*\b",
 ]
 
 # Patrones de chat simple (saludos, preguntas directas, etc.)
@@ -466,7 +483,9 @@ def es_meta_compleja(mensaje: str) -> bool:
             return True
 
     # Mensajes largos con múltiples oraciones → probablemente complejo
-    oraciones = [s.strip() for s in re.split(r"[.;]", msg) if s.strip()]
+    # Ignorar puntos dentro de dominios/URLs para el conteo de oraciones
+    msg_sin_dominios = re.sub(r"\b\w+\.(?:com|mx|org|net|io|co|edu|gov)\b", "DOMINIO", msg)
+    oraciones = [s.strip() for s in re.split(r"[.;]", msg_sin_dominios) if s.strip()]
     if len(oraciones) >= 3:
         return True
 
