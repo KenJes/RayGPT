@@ -257,25 +257,41 @@ class VoiceAssistant:
 
     def _record_until_silence(self, max_seconds: float = 12.0,
                                silence_sec: float = 1.0,
+                               grace_sec: float = 1.5,
                                threshold: float | None = None) -> np.ndarray | None:
         """Graba audio hasta detectar silencio tras habla (VAD simple).
 
+        grace_sec: segundos iniciales donde NO se corta por silencio
+                   (da tiempo al usuario a empezar a hablar tras el clic).
         También se detiene si _stop_recording se setea (clic del usuario).
         """
+        # Calibrar ruido ambiental del mic (0.5s)
+        try:
+            cal_frames = int(0.5 * self.SAMPLE_RATE)
+            cal = sd.rec(cal_frames, samplerate=self.SAMPLE_RATE,
+                         channels=1, dtype="float32")
+            sd.wait()
+            noise_floor = float(np.sqrt(np.mean(cal.flatten() ** 2)))
+        except Exception:
+            noise_floor = 0.005
+
+        # Umbral = ruido ambiental * 3 (o mínimo configurable)
         if threshold is None:
-            threshold = self.SILENCE_THRESHOLD
+            threshold = max(self.SILENCE_THRESHOLD, noise_floor * 3)
+        logger.debug(f"VAD: noise_floor={noise_floor:.4f}, threshold={threshold:.4f}")
 
         chunk_sec = 0.3
         chunk_frames = int(chunk_sec * self.SAMPLE_RATE)
         max_chunks = int(max_seconds / chunk_sec)
         silence_needed = max(1, int(silence_sec / chunk_sec))
+        grace_chunks = int(grace_sec / chunk_sec)
 
         chunks: list[np.ndarray] = []
         silent_count = 0
         has_speech = False
 
         try:
-            for _ in range(max_chunks):
+            for i in range(max_chunks):
                 if not self._running or self._stop_recording.is_set():
                     break
                 chunk = sd.rec(chunk_frames, samplerate=self.SAMPLE_RATE,
@@ -284,11 +300,12 @@ class VoiceAssistant:
                 flat = chunk.flatten()
                 chunks.append(flat)
 
-                rms = np.sqrt(np.mean(flat ** 2))
+                rms = float(np.sqrt(np.mean(flat ** 2)))
                 if rms >= threshold:
                     has_speech = True
                     silent_count = 0
-                elif has_speech:
+                elif has_speech and i >= grace_chunks:
+                    # Solo contar silencio después del grace period
                     silent_count += 1
                     if silent_count >= silence_needed:
                         break
@@ -298,10 +315,7 @@ class VoiceAssistant:
 
         if not chunks:
             return None
-        combined = np.concatenate(chunks)
-        if np.sqrt(np.mean(combined ** 2)) < threshold * 0.5:
-            return None
-        return combined
+        return np.concatenate(chunks)
 
     def _transcribe(self, audio: np.ndarray) -> str | None:
         """Transcribe audio usando la función STT provista."""
