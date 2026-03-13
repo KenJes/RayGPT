@@ -54,6 +54,7 @@ from core.agent_memory import VectorMemory
 from core.approval import approval_manager
 from core.conversation_db import ConversationDB
 from core.knowledge_db import KnowledgeBase
+from core.spotify_client import SpotifyClient
 
 # ====================================
 # CONFIGURACIÓN DE FLASK
@@ -122,7 +123,22 @@ try:
     # Inicializar infraestructura agéntica
     knowledge_base = KnowledgeBase()  # data/conocimiento.db
     logger.info("✅ Base de conocimiento inicializada (SQLite)")
-    adapter_registry = build_registry(gestor, knowledge_base=knowledge_base)
+
+    # Inicializar Spotify (opcional — solo si hay config)
+    spotify_config = config_agente.get("spotify", {})
+    spotify_client = None
+    if spotify_config.get("client_id") and spotify_config.get("client_secret"):
+        spotify_client = SpotifyClient(
+            client_id=spotify_config["client_id"],
+            client_secret=spotify_config["client_secret"],
+            redirect_uri=spotify_config.get("redirect_uri", "http://localhost:5000/spotify/callback"),
+        )
+        status = "✅ autenticado" if spotify_client.is_authenticated else "⚠️ pendiente de auth (/spotify/auth)"
+        logger.info(f"🎵 Spotify inicializado ({status})")
+    else:
+        logger.info("⚠️ Spotify no configurado (falta spotify.client_id/client_secret en config_agente.json)")
+
+    adapter_registry = build_registry(gestor, knowledge_base=knowledge_base, spotify_client=spotify_client)
 
     def _ai_chat_for_agent(messages, temperature=0.4, max_tokens=2000):
         """Función de chat para el AgentLoop — usa la cadena de fallback."""
@@ -334,6 +350,78 @@ def _extraer_y_guardar_conocimiento(mensaje: str, respuesta: str, user_id: str):
 
 
 # ====================================
+# SPOTIFY — DETECCIÓN DE COMANDOS RÁPIDOS
+# ====================================
+
+def _handle_spotify_command(mensaje: str) -> str | None:
+    """
+    Detecta comandos de Spotify en lenguaje natural.
+    Devuelve la respuesta directa o None si no es un comando de Spotify.
+    """
+    if not spotify_client or not spotify_client.is_authenticated:
+        return None
+
+    t = mensaje.lower().strip()
+
+    # Patrones de pausa
+    if t in ("pausa", "pause", "para la música", "para la musica", "detén la música",
+             "deten la musica", "stop music", "deja de tocar"):
+        try:
+            return spotify_client.pause()
+        except Exception as e:
+            return f"❌ Error pausando: {e}"
+
+    # Patrones de reanudar
+    if t in ("play", "dale play", "reanuda", "continua", "sigue tocando", "resume"):
+        try:
+            return spotify_client.play()
+        except Exception as e:
+            return f"❌ Error reanudando: {e}"
+
+    # Siguiente canción
+    if t in ("siguiente", "next", "skip", "salta", "siguiente canción", "siguiente cancion",
+             "cambia de canción", "cambia de cancion"):
+        try:
+            return spotify_client.next_track()
+        except Exception as e:
+            return f"❌ Error: {e}"
+
+    # Anterior
+    if t in ("anterior", "previous", "atrás", "atras", "regresa", "canción anterior", "cancion anterior"):
+        try:
+            return spotify_client.previous_track()
+        except Exception as e:
+            return f"❌ Error: {e}"
+
+    # Qué suena
+    if t in ("qué suena", "que suena", "qué está sonando", "que esta sonando", "what's playing",
+             "qué canción es", "que cancion es", "qué estoy escuchando", "que estoy escuchando"):
+        try:
+            return spotify_client.current_track()
+        except Exception as e:
+            return f"❌ Error: {e}"
+
+    # Reproducir algo — "pon X", "reproduce X", "play X", "ponme X"
+    play_patterns = [
+        "pon ", "ponme ", "reproduce ", "toca ", "play ",
+        "quiero escuchar ", "quiero oir ", "quiero oír ",
+        "pon la canción ", "pon la cancion ",
+        "ponme la canción ", "ponme la cancion ",
+        "pon la rola ", "ponme la rola ",
+    ]
+    for pattern in play_patterns:
+        if t.startswith(pattern):
+            query = mensaje[len(pattern):].strip()
+            if query:
+                try:
+                    return spotify_client.play(query)
+                except Exception as e:
+                    return f"❌ Error reproduciendo: {e}"
+
+    return None
+
+
+# ====================================
 # ENDPOINTS
 # ====================================
 
@@ -344,8 +432,46 @@ def health():
         "status": "ok",
         "agent": "rAImundoGPT",
         "version": "2.0",
-        "personality": config_agente.get('personalidad', {}).get('tono', 'desconocido')
+        "personality": config_agente.get('personalidad', {}).get('tono', 'desconocido'),
+        "spotify": "connected" if (spotify_client and spotify_client.is_authenticated) else "not_connected"
     })
+
+# ====================================
+# SPOTIFY OAUTH
+# ====================================
+
+@app.route('/spotify/auth', methods=['GET'])
+def spotify_auth():
+    """Redirige al usuario a Spotify para autorizar la app."""
+    if not spotify_client:
+        return jsonify({"error": "Spotify no está configurado. Agrega spotify.client_id y client_secret en config_agente.json"}), 400
+    if spotify_client.is_authenticated:
+        return '<h2>✅ Spotify ya está conectado!</h2><p>Puedes cerrar esta ventana.</p>'
+    auth_url = spotify_client.get_auth_url()
+    return f'<h2>🎵 Conectar Spotify</h2><p><a href="{auth_url}">Haz click aquí para autorizar Spotify</a></p>'
+
+@app.route('/spotify/callback', methods=['GET'])
+def spotify_callback():
+    """Callback de Spotify OAuth."""
+    if not spotify_client:
+        return jsonify({"error": "Spotify no configurado"}), 400
+    code = request.args.get('code')
+    error = request.args.get('error')
+    if error:
+        return f'<h2>❌ Error de Spotify</h2><p>{error}</p>', 400
+    if not code:
+        return '<h2>❌ Falta el código de autorización</h2>', 400
+    success = spotify_client.handle_callback(code)
+    if success:
+        return '<h2>✅ Spotify conectado exitosamente!</h2><p>Ya puedes pedirle a Raymundo que ponga música. Cierra esta ventana.</p>'
+    return '<h2>❌ Error al conectar Spotify</h2><p>Intenta de nuevo.</p>', 500
+
+@app.route('/spotify/status', methods=['GET'])
+def spotify_status():
+    """Estado de la conexión de Spotify."""
+    if not spotify_client:
+        return jsonify({"connected": False, "reason": "not_configured"})
+    return jsonify({"connected": spotify_client.is_authenticated})
 
 @app.route('/chat', methods=['POST'])
 def chat():
@@ -493,6 +619,15 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
 
         # Detectar si el usuario está siendo agresivo en ESTE mensaje (no persistente)
         usuario_agresivo = detectar_agresividad_usuario(mensaje_limpio)
+
+        # ─── SPOTIFY: comandos rápidos de reproducción ────────────
+        spotify_result = _handle_spotify_command(mensaje_limpio)
+        if spotify_result:
+            tiempo_respuesta = time.time() - tiempo_inicio
+            logger.info(f"🎵 Spotify comando directo ({tiempo_respuesta:.2f}s)")
+            agregar_mensaje(user_id, "user", mensaje_limpio)
+            agregar_mensaje(user_id, "assistant", spotify_result)
+            return jsonify({"respuesta": spotify_result, "user_id": user_id})
 
         # ─── MEDIA ADJUNTA: extraer texto (imagen o PDF) ─────────
         texto_imagen_extraido = None
@@ -1146,6 +1281,8 @@ if __name__ == '__main__':
     print(f"   • GET  http://localhost:5000/health")
     print(f"   • GET  http://localhost:5000/stats")
     print(f"   • DEL  http://localhost:5000/clear_history/<user_id>")
+    print(f"   • GET  http://localhost:5000/spotify/auth")
+    print(f"   • GET  http://localhost:5000/spotify/status")
     print(f"\n⏹️  Presiona Ctrl+C para detener\n")
     print("="*70 + "\n")
     

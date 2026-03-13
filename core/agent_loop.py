@@ -81,6 +81,11 @@ Responde SIEMPRE con un JSON válido con esta estructura exacta:
     usa `store_person` o `add_fact` para registrarlos en la KB para futuras consultas.
 16. Si hay "[CONOCIMIENTO ALMACENADO EN BASE DE DATOS]" en tu contexto, USA esa información
     para responder — son datos que ya aprendiste en conversaciones o CVs anteriores.
+17. Tienes control de Spotify con las herramientas `spotify_play`, `spotify_pause`, `spotify_next`,
+    `spotify_previous`, `spotify_current`, `spotify_volume`, `spotify_queue`, `spotify_search`,
+    `spotify_devices`. Cuando el usuario pida música, úsalas. Para reproducir, usa `spotify_play`
+    con `query` = nombre de canción/artista/album. Si dice "pause", "para", "detén", usa `spotify_pause`.
+    Si dice "siguiente", usa `spotify_next`. Si dice "qué suena", usa `spotify_current`.
 
 ### CONTEXTO PREVIO (RAG)
 

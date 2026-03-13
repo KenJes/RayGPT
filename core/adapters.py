@@ -624,6 +624,201 @@ class QueryKnowledgeAdapter(ToolAdapter):
 
 
 # ═══════════════════════════════════════════════════════════════
+# Spotify Adapters
+# ═══════════════════════════════════════════════════════════════
+
+class SpotifyPlayAdapter(ToolAdapter):
+    """Reproduce música en Spotify."""
+
+    name = "spotify_play"
+    description = (
+        "Play music on Spotify. If 'query' is provided, searches and plays that song/artist/album/playlist. "
+        "If no 'query', resumes current playback. "
+        "Args: 'query' (optional — song name, artist, album, or playlist to play)."
+    )
+    requires_approval = False
+
+    def __init__(self, spotify_client):
+        self.spotify = spotify_client
+
+    def execute(self, args: dict) -> dict:
+        if not self.spotify.is_authenticated:
+            return {"success": False, "output": None, "error": "Spotify no está conectado. Dile al usuario que visite /spotify/auth"}
+        try:
+            query = args.get("query")
+            result = self.spotify.play(query)
+            return {"success": True, "output": result, "error": None}
+        except Exception as e:
+            return {"success": False, "output": None, "error": str(e)}
+
+
+class SpotifyPauseAdapter(ToolAdapter):
+    """Pausa la reproducción de Spotify."""
+
+    name = "spotify_pause"
+    description = "Pause Spotify playback. No args needed."
+    requires_approval = False
+
+    def __init__(self, spotify_client):
+        self.spotify = spotify_client
+
+    def execute(self, args: dict) -> dict:
+        if not self.spotify.is_authenticated:
+            return {"success": False, "output": None, "error": "Spotify no está conectado."}
+        try:
+            return {"success": True, "output": self.spotify.pause(), "error": None}
+        except Exception as e:
+            return {"success": False, "output": None, "error": str(e)}
+
+
+class SpotifyNextAdapter(ToolAdapter):
+    """Salta a la siguiente canción."""
+
+    name = "spotify_next"
+    description = "Skip to the next track on Spotify. No args needed."
+    requires_approval = False
+
+    def __init__(self, spotify_client):
+        self.spotify = spotify_client
+
+    def execute(self, args: dict) -> dict:
+        if not self.spotify.is_authenticated:
+            return {"success": False, "output": None, "error": "Spotify no está conectado."}
+        try:
+            return {"success": True, "output": self.spotify.next_track(), "error": None}
+        except Exception as e:
+            return {"success": False, "output": None, "error": str(e)}
+
+
+class SpotifyPreviousAdapter(ToolAdapter):
+    """Regresa a la canción anterior."""
+
+    name = "spotify_previous"
+    description = "Go back to the previous track on Spotify. No args needed."
+    requires_approval = False
+
+    def __init__(self, spotify_client):
+        self.spotify = spotify_client
+
+    def execute(self, args: dict) -> dict:
+        if not self.spotify.is_authenticated:
+            return {"success": False, "output": None, "error": "Spotify no está conectado."}
+        try:
+            return {"success": True, "output": self.spotify.previous_track(), "error": None}
+        except Exception as e:
+            return {"success": False, "output": None, "error": str(e)}
+
+
+class SpotifyCurrentAdapter(ToolAdapter):
+    """Muestra la canción que está sonando."""
+
+    name = "spotify_current"
+    description = "Show what is currently playing on Spotify. No args needed."
+    requires_approval = False
+
+    def __init__(self, spotify_client):
+        self.spotify = spotify_client
+
+    def execute(self, args: dict) -> dict:
+        if not self.spotify.is_authenticated:
+            return {"success": False, "output": None, "error": "Spotify no está conectado."}
+        try:
+            return {"success": True, "output": self.spotify.current_track(), "error": None}
+        except Exception as e:
+            return {"success": False, "output": None, "error": str(e)}
+
+
+class SpotifyVolumeAdapter(ToolAdapter):
+    """Ajusta el volumen de Spotify."""
+
+    name = "spotify_volume"
+    description = (
+        "Set Spotify volume level. Args: 'volume' (integer 0-100)."
+    )
+    requires_approval = False
+
+    def __init__(self, spotify_client):
+        self.spotify = spotify_client
+
+    def execute(self, args: dict) -> dict:
+        if not self.spotify.is_authenticated:
+            return {"success": False, "output": None, "error": "Spotify no está conectado."}
+        try:
+            vol = int(args.get("volume", 50))
+            return {"success": True, "output": self.spotify.set_volume(vol), "error": None}
+        except Exception as e:
+            return {"success": False, "output": None, "error": str(e)}
+
+
+class SpotifyQueueAdapter(ToolAdapter):
+    """Agrega una canción a la cola de reproducción."""
+
+    name = "spotify_queue"
+    description = (
+        "Add a song to the Spotify playback queue. Args: 'query' (song name to add)."
+    )
+    requires_approval = False
+
+    def __init__(self, spotify_client):
+        self.spotify = spotify_client
+
+    def execute(self, args: dict) -> dict:
+        if not self.spotify.is_authenticated:
+            return {"success": False, "output": None, "error": "Spotify no está conectado."}
+        query = args.get("query", "")
+        if not query:
+            return {"success": False, "output": None, "error": "Falta el argumento 'query'."}
+        try:
+            return {"success": True, "output": self.spotify.add_to_queue(query), "error": None}
+        except Exception as e:
+            return {"success": False, "output": None, "error": str(e)}
+
+
+class SpotifySearchAdapter(ToolAdapter):
+    """Busca canciones, artistas, albums o playlists en Spotify."""
+
+    name = "spotify_search"
+    description = (
+        "Search Spotify for songs, artists, albums, or playlists. "
+        "Args: 'query' (search text). Returns formatted results."
+    )
+    requires_approval = False
+
+    def __init__(self, spotify_client):
+        self.spotify = spotify_client
+
+    def execute(self, args: dict) -> dict:
+        if not self.spotify.is_authenticated:
+            return {"success": False, "output": None, "error": "Spotify no está conectado."}
+        query = args.get("query", "")
+        if not query:
+            return {"success": False, "output": None, "error": "Falta el argumento 'query'."}
+        try:
+            return {"success": True, "output": self.spotify.search(query), "error": None}
+        except Exception as e:
+            return {"success": False, "output": None, "error": str(e)}
+
+
+class SpotifyDevicesAdapter(ToolAdapter):
+    """Lista dispositivos Spotify disponibles."""
+
+    name = "spotify_devices"
+    description = "List available Spotify playback devices. No args needed."
+    requires_approval = False
+
+    def __init__(self, spotify_client):
+        self.spotify = spotify_client
+
+    def execute(self, args: dict) -> dict:
+        if not self.spotify.is_authenticated:
+            return {"success": False, "output": None, "error": "Spotify no está conectado."}
+        try:
+            return {"success": True, "output": self.spotify.get_devices(), "error": None}
+        except Exception as e:
+            return {"success": False, "output": None, "error": str(e)}
+
+
+# ═══════════════════════════════════════════════════════════════
 # Registry
 # ═══════════════════════════════════════════════════════════════
 
@@ -658,7 +853,7 @@ class AdapterRegistry:
         return adapter.requires_approval if adapter else True  # unknown → require approval
 
 
-def build_registry(gestor, knowledge_base=None) -> AdapterRegistry:
+def build_registry(gestor, knowledge_base=None, spotify_client=None) -> AdapterRegistry:
     """
     Construye el registry con todos los adapters disponibles,
     reutilizando los componentes que ya tiene GestorHerramientas.
@@ -683,5 +878,17 @@ def build_registry(gestor, knowledge_base=None) -> AdapterRegistry:
         registry.register(StorePersonAdapter(knowledge_base))
         registry.register(AddFactAdapter(knowledge_base))
         registry.register(QueryKnowledgeAdapter(knowledge_base))
+
+    # Spotify adapters (solo si hay cliente Spotify)
+    if spotify_client:
+        registry.register(SpotifyPlayAdapter(spotify_client))
+        registry.register(SpotifyPauseAdapter(spotify_client))
+        registry.register(SpotifyNextAdapter(spotify_client))
+        registry.register(SpotifyPreviousAdapter(spotify_client))
+        registry.register(SpotifyCurrentAdapter(spotify_client))
+        registry.register(SpotifyVolumeAdapter(spotify_client))
+        registry.register(SpotifyQueueAdapter(spotify_client))
+        registry.register(SpotifySearchAdapter(spotify_client))
+        registry.register(SpotifyDevicesAdapter(spotify_client))
 
     return registry

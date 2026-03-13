@@ -32,5 +32,10 @@
       "header": "#1f1f1f",
       "input": "#2b1b1b"
     }
+  },
+  "spotify": {
+    "client_id": "",
+    "client_secret": "",
+    "redirect_uri": "http://localhost:5000/spotify/callback"
   }
 }
