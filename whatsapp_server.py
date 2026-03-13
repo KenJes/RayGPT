@@ -21,11 +21,16 @@ ENDPOINTS:
 
 import re
 import json
+import os
 import time
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import logging
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Cargar variables de entorno desde .env
+load_dotenv()
 
 BASE_DIR = Path(__file__).resolve().parent
 CONFIG_DIR = BASE_DIR / "config"
@@ -126,12 +131,15 @@ try:
 
     # Inicializar Spotify (opcional — solo si hay config)
     spotify_config = config_agente.get("spotify", {})
+    sp_client_id = os.getenv("SPOTIFY_CLIENT_ID") or spotify_config.get("client_id", "")
+    sp_client_secret = os.getenv("SPOTIFY_CLIENT_SECRET") or spotify_config.get("client_secret", "")
+    sp_redirect_uri = os.getenv("SPOTIFY_REDIRECT_URI") or spotify_config.get("redirect_uri", "http://localhost:5000/spotify/callback")
     spotify_client = None
-    if spotify_config.get("client_id") and spotify_config.get("client_secret"):
+    if sp_client_id and sp_client_secret:
         spotify_client = SpotifyClient(
-            client_id=spotify_config["client_id"],
-            client_secret=spotify_config["client_secret"],
-            redirect_uri=spotify_config.get("redirect_uri", "http://localhost:5000/spotify/callback"),
+            client_id=sp_client_id,
+            client_secret=sp_client_secret,
+            redirect_uri=sp_redirect_uri,
         )
         status = "✅ autenticado" if spotify_client.is_authenticated else "⚠️ pendiente de auth (/spotify/auth)"
         logger.info(f"🎵 Spotify inicializado ({status})")
