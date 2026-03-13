@@ -59,7 +59,7 @@ from core.agent_memory import VectorMemory
 from core.approval import approval_manager
 from core.conversation_db import ConversationDB
 from core.knowledge_db import KnowledgeBase
-from core.spotify_client import SpotifyClient
+from core.spotify_client import SpotifyClient, detect_spotify_intent
 
 # ====================================
 # CONFIGURACIÓN DE FLASK
@@ -361,65 +361,6 @@ def _extraer_y_guardar_conocimiento(mensaje: str, respuesta: str, user_id: str):
 # SPOTIFY — DETECCIÓN DE COMANDOS RÁPIDOS
 # ====================================
 
-_SPOTIFY_PLAY_RE = re.compile(
-    r"^(?:pon(?:me)?|reproduce|toca|play|"
-    r"quiero\s+(?:escuchar|o[ií]r)|"
-    r"pon(?:me)?\s+(?:la\s+)?(?:canci[oó]n|rola|pista))\s+(.+)",
-    re.IGNORECASE,
-)
-_SPOTIFY_SUFFIX_RE = re.compile(
-    r"\s+en\s+(?:spotify|apple\s+music|youtube\s+music|deezer|tidal)\s*$",
-    re.IGNORECASE,
-)
-
-def _detect_spotify_intent(t: str):
-    """
-    Devuelve (intent, query) si el mensaje es un comando de Spotify, o (None, None).
-    Trabaja sobre texto ya en minúsculas y sin espacios al inicio/fin.
-    """
-    # Pausa
-    if re.search(
-        r"\b(pausa|pause|para\s+la\s+m[uú]sica|det[eé]n\s+la\s+m[uú]sica|"
-        r"stop\s+music|deja\s+de\s+tocar|calla\s+la\s+m[uú]sica)\b",
-        t
-    ):
-        return ("pause", "")
-
-    # Reanudar
-    if re.fullmatch(
-        r"(?:play|dale\s+play|reanuda|contin[uú]a|sigue\s+tocando|resume)",
-        t
-    ):
-        return ("play", "")
-
-    # Siguiente
-    if re.search(r"\b(siguiente(?:\s+canci[oó]n)?|next|skip|salta)\b", t):
-        return ("next", "")
-
-    # Anterior
-    if re.search(r"\b(anterior(?:\s+canci[oó]n)?|previous|atr[aá]s|regresa)\b", t):
-        return ("previous", "")
-
-    # Qué suena
-    if re.search(
-        r"\b(qu[eé]\s+su[eé]na|qu[eé]\s+est[aá]\s+sonando|what.s\s+playing|"
-        r"qu[eé]\s+canci[oó]n\s+(?:es|suena)|qu[eé]\s+estoy\s+escuchando)\b",
-        t
-    ):
-        return ("current", "")
-
-    # Reproducir algo con query
-    m = _SPOTIFY_PLAY_RE.match(t)
-    if m:
-        query = m.group(1).strip()
-        # Quitar sufijo "en spotify", "en apple music", etc.
-        query = _SPOTIFY_SUFFIX_RE.sub("", query).strip()
-        if query:
-            return ("play", query)
-
-    return (None, None)
-
-
 def _handle_spotify_command(mensaje: str) -> str | None:
     """
     Detecta comandos de Spotify en lenguaje natural.
@@ -427,7 +368,7 @@ def _handle_spotify_command(mensaje: str) -> str | None:
     Si el comando es reconocido pero Spotify no está autenticado, avisa al usuario.
     """
     t = mensaje.lower().strip()
-    intent, query = _detect_spotify_intent(t)
+    intent, query = detect_spotify_intent(t)
 
     if intent is None:
         return None  # No es un comando de Spotify — continuar flujo normal

@@ -37,6 +37,65 @@ logger = logging.getLogger(__name__)
 
 _TOKEN_PATH = Path(__file__).resolve().parent.parent / "data" / "spotify_token.json"
 
+# ──────────────────────────────────────────────────────────────
+# Detección de intents de Spotify (compartida entre server y voice)
+# ──────────────────────────────────────────────────────────────
+_PLAY_RE = re.compile(
+    r"^(?:pon(?:me)?|reproduce|toca|play|"
+    r"quiero\s+(?:escuchar|o[ií]r)|"
+    r"pon(?:me)?\s+(?:la\s+)?(?:canci[oó]n|rola|pista))\s+(.+)",
+    re.IGNORECASE,
+)
+_SUFFIX_RE = re.compile(
+    r"\s+en\s+(?:spotify|apple\s+music|youtube\s+music|deezer|tidal)\s*$",
+    re.IGNORECASE,
+)
+
+
+def detect_spotify_intent(t: str) -> tuple[str | None, str]:
+    """
+    Detecta si un texto (en minúsculas, strip) es un comando de Spotify.
+    Devuelve (intent, query) o (None, "").
+    """
+    # Pausa
+    if re.search(
+        r"\b(pausa|pause|para\s+la\s+m[uú]sica|det[eé]n\s+la\s+m[uú]sica|"
+        r"stop\s+music|deja\s+de\s+tocar|calla\s+la\s+m[uú]sica)\b", t
+    ):
+        return ("pause", "")
+
+    # Reanudar
+    if re.fullmatch(
+        r"(?:play|dale\s+play|reanuda|contin[uú]a|sigue\s+tocando|resume)", t
+    ):
+        return ("play", "")
+
+    # Siguiente
+    if re.search(r"\b(siguiente(?:\s+canci[oó]n)?|next|skip|salta)\b", t):
+        return ("next", "")
+
+    # Anterior
+    if re.search(r"\b(anterior(?:\s+canci[oó]n)?|previous|atr[aá]s|regresa)\b", t):
+        return ("previous", "")
+
+    # Qué suena
+    if re.search(
+        r"\b(qu[eé]\s+su[eé]na|qu[eé]\s+est[aá]\s+sonando|what.s\s+playing|"
+        r"qu[eé]\s+canci[oó]n\s+(?:es|suena)|qu[eé]\s+estoy\s+escuchando)\b", t
+    ):
+        return ("current", "")
+
+    # Reproducir algo con query
+    m = _PLAY_RE.match(t)
+    if m:
+        query = m.group(1).strip()
+        query = _SUFFIX_RE.sub("", query).strip()
+        if query:
+            return ("play", query)
+
+    return (None, "")
+
+
 # Scopes necesarios para control completo de reproducción
 _SCOPES = " ".join([
     "user-read-playback-state",
