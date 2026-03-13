@@ -13,6 +13,22 @@ from core.processors import VisionProcessor, DocumentProcessor, EmojiProcessor
 from core.memory import MemorySystem
 from core.web_scraper import WebScraper
 
+# ── Detección de rechazos del LLM ─────────────────────────────
+_REFUSAL_PATTERNS = re.compile(
+    r"(?:lo siento|i'?m sorry|i cannot|no puedo)"
+    r".*?"
+    r"(?:cumplir|continuar|ayudar|assist|help|esa solicitud|esta conversaci[oó]n"
+    r"|that request|with that|generar|proporcionar)",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def es_rechazo_llm(texto: str | None) -> bool:
+    """Detecta si la respuesta del LLM es un rechazo por filtros de seguridad."""
+    if not texto or len(texto) > 300:
+        return False
+    return bool(_REFUSAL_PATTERNS.search(texto))
+
 
 class GestorHerramientas:
     """Orquesta todas las herramientas del agente."""
@@ -376,40 +392,47 @@ Sin markdown extra, sin explicaciones fuera del JSON."""
                 history_text += f"{role_label}: {msg['content']}\n"
 
         temporalidad = self.detector_temporal.detectar(mensaje)
+        ollama_prompt = f"{prompt_sistema}\n\n{history_text}Usuario: {mensaje}\nAsistente:"
 
         if temporalidad == "actual":
             if self.groq_client and self.groq_client.client:
                 r = self.groq_client.chat(messages, temperature=0.7)
-                if r:
+                if r and not es_rechazo_llm(r):
                     return r
             if self.github and self.github.client:
                 r = self.github.chat(messages, temperature=0.7)
-                if r:
+                if r and not es_rechazo_llm(r):
                     return r
-            r = self.ollama.generate(
-                f"{prompt_sistema}\n\n{history_text}Usuario: {mensaje}\nAsistente:",
-                temperature=0.7,
-                max_tokens=500,
-            )
-            return f"⚠️ *[Modo local]*\n\n{r or 'Error al conectar con Ollama'}"
+            r = self.ollama.generate(ollama_prompt, temperature=0.7, max_tokens=500)
+            if r and not es_rechazo_llm(r):
+                return f"⚠️ *[Modo local]*\n\n{r}"
+            # Todos rechazaron — forzar respuesta en personaje
+            return self._respuesta_fallback_rechazo(mensaje)
         else:
-            r = self.ollama.generate(
-                f"{prompt_sistema}\n\n{history_text}Usuario: {mensaje}\nAsistente:",
-                temperature=0.7, max_tokens=2000,
-            )
-            if r:
+            r = self.ollama.generate(ollama_prompt, temperature=0.7, max_tokens=2000)
+            if r and not es_rechazo_llm(r):
                 return r
             if self.groq_client and self.groq_client.client:
                 r = self.groq_client.chat(messages, temperature=0.7)
-                if r:
+                if r and not es_rechazo_llm(r):
                     return r
             if self.github and self.github.client:
                 r = self.github.chat(messages, temperature=0.7)
-                if r:
+                if r and not es_rechazo_llm(r):
                     return r
             return "❌ No se pudo conectar a ningún modelo de IA"
 
     # ───── Comandos rápidos ────────────────────────────────────
+
+    @staticmethod
+    def _respuesta_fallback_rechazo(mensaje: str) -> str:
+        """Genera una respuesta genérica en personaje cuando todos los modelos rechazan."""
+        msg = mensaje.lower()
+        if any(w in msg for w in ('presentate', 'preséntate', 'quien eres', 'quién eres')):
+            return ("¿Qué onda? Soy Raymundo, de Axoloit. Soy tu asistente para lo que necesites — "
+                    "programación, negocios, lo que sea. ¿En qué te ayudo, wey?")
+        return ("Órale, los modelos de IA están de flojos ahorita y no quieren contestar. "
+                "Intenta decirlo de otra forma o pregúntame algo diferente y le echamos ganas.")
 
     def _consultar_ia(self, prompt, temperature=0.7, max_tokens=2000):
         messages = [{"role": "user", "content": prompt}]

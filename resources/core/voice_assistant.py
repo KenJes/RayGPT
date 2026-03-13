@@ -452,13 +452,14 @@ def _run_standalone():
     agent_memory = VectorMemory()
 
     def _ai_chat(messages, temperature=0.4, max_tokens=2000):
+        from core.tools import es_rechazo_llm
         if groq and groq.client:
             r = groq.chat(messages, temperature=temperature, max_tokens=max_tokens)
-            if r:
+            if r and not es_rechazo_llm(r):
                 return r
         if github and github.client:
             r = github.chat(messages, temperature=temperature, max_tokens=max_tokens)
-            if r:
+            if r and not es_rechazo_llm(r):
                 return r
         prompt = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in messages)
         return ollama.generate(prompt, temperature=temperature, max_tokens=max_tokens) or ""

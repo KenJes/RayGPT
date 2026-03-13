@@ -401,9 +401,20 @@ class AgentLoop:
     # ─── Helpers ──────────────────────────────────────────────
 
     def _call_llm(self, messages: list[dict]) -> str:
-        """Llama al LLM con la cadena de mensajes y devuelve la respuesta raw."""
+        """Llama al LLM con la cadena de mensajes y devuelve la respuesta raw.
+        Si la respuesta es un rechazo por filtros de seguridad, reintenta
+        con un prompt simplificado (sin historial agresivo)."""
+        from core.tools import es_rechazo_llm
         try:
             response = self.ai_chat(messages, 0.4, 2000)
+            if response and not es_rechazo_llm(response):
+                return response
+            # Rechazo detectado — reintentar sin historial de conversación
+            simplified = [m for m in messages if m["role"] in ("system", "user")]
+            if len(simplified) < len(messages):
+                response2 = self.ai_chat(simplified, 0.4, 2000)
+                if response2 and not es_rechazo_llm(response2):
+                    return response2
             return response or ""
         except Exception as e:
             return f"Error llamando al LLM: {e}"

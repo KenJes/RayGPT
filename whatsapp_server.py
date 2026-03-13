@@ -148,14 +148,16 @@ try:
     adapter_registry = build_registry(gestor, knowledge_base=knowledge_base, spotify_client=spotify_client)
 
     def _ai_chat_for_agent(messages, temperature=0.4, max_tokens=2000):
-        """Función de chat para el AgentLoop — usa la cadena de fallback."""
+        """Función de chat para el AgentLoop — usa la cadena de fallback.
+        Salta respuestas que sean rechazos por filtros de seguridad."""
+        from core.tools import es_rechazo_llm
         if groq and groq.client:
             r = groq.chat(messages, temperature=temperature, max_tokens=max_tokens)
-            if r:
+            if r and not es_rechazo_llm(r):
                 return r
         if github and github.client:
             r = github.chat(messages, temperature=temperature, max_tokens=max_tokens)
-            if r:
+            if r and not es_rechazo_llm(r):
                 return r
         # Ollama solo acepta prompt plano
         prompt = "\n".join(
