@@ -204,9 +204,11 @@ class GroqClient:
         if not self.client:
             return None
         try:
+            # Truncar mensajes si el payload es muy grande (evitar 413)
+            trimmed = self._trim_messages(messages)
             response = self.client.chat.completions.create(
                 model=self.model,
-                messages=messages,
+                messages=trimmed,
                 temperature=temperature,
                 max_tokens=max_tokens,
             )
@@ -224,8 +226,24 @@ class GroqClient:
             if "429" in error_msg or "rate_limit" in error_msg.lower():
                 print("⚠️ Groq rate limit alcanzado (30 RPM)")
                 return None
+            if "413" in error_msg or "Payload Too Large" in error_msg:
+                print("⚠️ Groq payload demasiado grande, saltando")
+                return None
             print(f"Error Groq: {error_msg}")
             return None
+
+    @staticmethod
+    def _trim_messages(messages, max_chars=24000):
+        """Recorta historial para no exceder límite de payload."""
+        total = sum(len(m.get("content", "")) for m in messages)
+        if total <= max_chars:
+            return messages
+        # Conservar system + últimos mensajes, recortar historial del medio
+        system = [m for m in messages if m["role"] == "system"]
+        others = [m for m in messages if m["role"] != "system"]
+        while others and sum(len(m.get("content", "")) for m in system + others) > max_chars:
+            others.pop(0)  # quitar mensajes más viejos
+        return system + others
 
     def is_available(self):
         if not self.client:
