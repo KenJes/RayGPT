@@ -422,8 +422,8 @@ def _run_standalone():
         return ollama.generate(prompt, temperature=temperature, max_tokens=max_tokens) or ""
 
     agent_loop = AgentLoop(
+        registry=registry,
         ai_chat_fn=_ai_chat,
-        adapter_registry=registry,
         logger=agent_logger,
         memory=agent_memory,
     )
