@@ -384,17 +384,10 @@ Sin markdown extra, sin explicaciones fuera del JSON."""
             messages.extend(history)
         messages.append({"role": "user", "content": mensaje})
 
-        # Para Ollama (que usa prompt plano), construir texto con contexto
-        history_text = ""
-        if history:
-            for msg in history[-10:]:  # Últimos 10 mensajes para el prompt plano
-                role_label = "Usuario" if msg["role"] == "user" else "Asistente"
-                history_text += f"{role_label}: {msg['content']}\n"
-
         temporalidad = self.detector_temporal.detectar(mensaje)
-        ollama_prompt = f"{prompt_sistema}\n\n{history_text}Usuario: {mensaje}\nAsistente:"
 
         if temporalidad == "actual":
+            # Tema actual → Groq primero (más capaz), luego GitHub, luego Ollama
             if self.groq_client and self.groq_client.client:
                 r = self.groq_client.chat(messages, temperature=0.7)
                 if r and not es_rechazo_llm(r):
@@ -403,13 +396,13 @@ Sin markdown extra, sin explicaciones fuera del JSON."""
                 r = self.github.chat(messages, temperature=0.7)
                 if r and not es_rechazo_llm(r):
                     return r
-            r = self.ollama.generate(ollama_prompt, temperature=0.7, max_tokens=500)
+            r = self.ollama.chat(messages, temperature=0.7, max_tokens=2000)
             if r and not es_rechazo_llm(r):
-                return f"⚠️ *[Modo local]*\n\n{r}"
-            # Todos rechazaron — forzar respuesta en personaje
+                return r
             return self._respuesta_fallback_rechazo(mensaje)
         else:
-            r = self.ollama.generate(ollama_prompt, temperature=0.7, max_tokens=2000)
+            # Tema histórico/general → Ollama primero (gratis), luego Groq, luego GitHub
+            r = self.ollama.chat(messages, temperature=0.7, max_tokens=2000)
             if r and not es_rechazo_llm(r):
                 return r
             if self.groq_client and self.groq_client.client:

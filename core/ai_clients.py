@@ -19,7 +19,7 @@ from groq import Groq
 class OllamaClient:
     """Cliente para Ollama local (GPU)."""
 
-    def __init__(self, url="http://localhost:11434", model="llama3.1:8b"):
+    def __init__(self, url="http://localhost:11434", model="qwen2.5:7b"):
         self.url = url
         self.model = model
         self.last_tokens_used = 0
@@ -40,10 +40,41 @@ class OllamaClient:
             if response.status_code == 200:
                 data = response.json()
                 self.last_tokens_used = data.get("eval_count", 0)
-                return data.get("response", "")
+                text = data.get("response", "")
+                import re as _re
+                text = _re.sub(r"<think>[\s\S]*?</think>\s*", "", text).strip()
+                return text or None
             return None
         except Exception as e:
             print(f"Error Ollama: {e}")
+            return None
+
+    def chat(self, messages, temperature=0.7, max_tokens=2000):
+        """Chat con formato messages [{role, content}] via /api/chat."""
+        try:
+            response = requests.post(
+                f"{self.url}/api/chat",
+                json={
+                    "model": self.model,
+                    "messages": messages,
+                    "stream": False,
+                    "options": {
+                        "temperature": temperature,
+                        "num_predict": max_tokens,
+                    },
+                },
+                timeout=120,
+            )
+            if response.status_code == 200:
+                data = response.json()
+                self.last_tokens_used = data.get("eval_count", 0)
+                text = data.get("message", {}).get("content", "")
+                import re as _re
+                text = _re.sub(r"<think>[\s\S]*?</think>\s*", "", text).strip()
+                return text or None
+            return None
+        except Exception as e:
+            print(f"Error Ollama chat: {e}")
             return None
 
     def is_available(self):

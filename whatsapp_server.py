@@ -148,22 +148,23 @@ try:
     adapter_registry = build_registry(gestor, knowledge_base=knowledge_base, spotify_client=spotify_client)
 
     def _ai_chat_for_agent(messages, temperature=0.4, max_tokens=2000):
-        """Función de chat para el AgentLoop — usa la cadena de fallback.
-        Salta respuestas que sean rechazos por filtros de seguridad."""
+        """Función de chat para el AgentLoop — Ollama primero, Groq/GitHub como refuerzo."""
         from core.tools import es_rechazo_llm
+        # 1. Ollama local (gratis, ilimitado)
+        r = ollama.chat(messages, temperature=temperature, max_tokens=max_tokens)
+        if r and not es_rechazo_llm(r):
+            return r
+        # 2. Groq (rate limited)
         if groq and groq.client:
             r = groq.chat(messages, temperature=temperature, max_tokens=max_tokens)
             if r and not es_rechazo_llm(r):
                 return r
+        # 3. GitHub Models GPT-4o (rate limited)
         if github and github.client:
             r = github.chat(messages, temperature=temperature, max_tokens=max_tokens)
             if r and not es_rechazo_llm(r):
                 return r
-        # Ollama solo acepta prompt plano
-        prompt = "\n".join(
-            f"{m['role'].capitalize()}: {m['content']}" for m in messages
-        )
-        return ollama.generate(prompt, temperature=temperature, max_tokens=max_tokens) or ""
+        return ""
 
     agent_logger = AgentLogger()
     agent_memory = VectorMemory()
