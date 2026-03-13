@@ -278,7 +278,123 @@ class SpotifyClient:
 
         return "\n".join(lines) if len(lines) > 1 else f"❌ No encontré resultados para '{query}'"
 
-    # ─── Búsqueda inteligente ─────────────────────────────────
+    # ─── Búsqueda de playlists ──────────────────────────────
+
+    def _search_playlist(self, query: str) -> dict | None:
+        """
+        Busca playlist: primero en las del usuario, luego global.
+        Prioriza coincidencia exacta del nombre.
+        """
+        sp = self._ensure_auth()
+
+        # Limpiar query: quitar "la playlist", "playlist de", etc.
+        clean = self._PLAYLIST_PREFIX_RE.sub("", query).strip()
+        if not clean:
+            clean = query
+        q = self._normalize(clean)
+        logger.debug(f"🔍 Playlist search: query='{clean}' (normalized='{q}')")
+
+        # 1. Buscar en playlists del usuario (propias + guardadas)
+        user_playlists = []
+        try:
+            offset = 0
+            while offset < 200:  # Máximo 200 playlists del usuario
+                batch = sp.current_user_playlists(limit=50, offset=offset)
+                items = batch.get("items", [])
+                if not items:
+                    break
+                user_playlists.extend(items)
+                offset += 50
+                if not batch.get("next"):
+                    break
+        except Exception as e:
+            logger.warning(f"⚠️ No se pudieron cargar playlists del usuario: {e}")
+
+        # Buscar match en playlists del usuario
+        if user_playlists:
+            best_user = self._best_name_match(clean, user_playlists)
+            user_score = self._name_score(q, self._normalize(best_user["name"]))
+            logger.debug(f"📋 Mejor playlist del usuario: '{best_user['name']}' "
+                          f"(score={user_score:.1f})")
+            # Si hay match razonable (>= 40), usar la del usuario
+            if user_score >= 40:
+                return {"type": "playlist", "uri": best_user["uri"], "name": best_user["name"]}
+
+        # 2. Buscar en Spotify global
+        results = sp.search(q=clean, limit=20, type="playlist")
+        global_playlists = results.get("playlists", {}).get("items", [])
+
+        if global_playlists:
+            best_global = self._best_name_match(clean, global_playlists)
+            global_score = self._name_score(q, self._normalize(best_global["name"]))
+            logger.debug(f"🌐 Mejor playlist global: '{best_global['name']}' "
+                          f"(score={global_score:.1f})")
+
+            # Comparar: si el usuario tiene una buena y la global es mejor, elegir la mejor
+            if user_playlists and user_score >= 40:
+                # Bonus de +10 para playlists propias (preferir las del usuario)
+                if user_score + 10 >= global_score:
+                    return {"type": "playlist", "uri": best_user["uri"],
+                            "name": best_user["name"]}
+            return {"type": "playlist", "uri": best_global["uri"],
+                    "name": best_global["name"]}
+
+        # 3. Si global no encontró nada pero el usuario tiene algo
+        if user_playlists:
+            return {"type": "playlist", "uri": best_user["uri"], "name": best_user["name"]}
+
+        return None
+
+    def _best_name_match(self, query: str, items: list) -> dict:
+        """Elige el item con nombre más cercano al query."""
+        q = self._normalize(query)
+        return max(items, key=lambda item: self._name_score(q, self._normalize(item["name"])))
+
+    @staticmethod
+    def _name_score(q: str, name: str) -> float:
+        """
+        Scoring de similitud entre query y nombre de playlist/album.
+        Maneja nombres parciales, emojis, y prefijos como 'This Is'.
+        """
+        # Limpiar emojis y caracteres especiales para comparación
+        import re as _re
+        emoji_re = _re.compile(
+            "[\U0001F600-\U0001F64F\U0001F300-\U0001F5FF\U0001F680-\U0001F6FF"
+            "\U0001F900-\U0001F9FF\U00002702-\U000027B0\U0001FA00-\U0001FA6F"
+            "\U0001FA70-\U0001FAFF\U00002600-\U000026FF]+", flags=_re.UNICODE
+        )
+        name_clean = emoji_re.sub("", name).strip()
+        q_clean = emoji_re.sub("", q).strip()
+
+        pts = 0.0
+
+        # Coincidencia exacta
+        if name_clean == q_clean:
+            return 100.0
+
+        # Coincidencia sin emojis/extras
+        if q_clean and name_clean and (
+            q_clean in name_clean or name_clean in q_clean
+        ):
+            # Ratio de cobertura: qué tanto del nombre cubre el query
+            overlap = len(q_clean) / max(len(name_clean), 1)
+            pts = 40 + (overlap * 40)  # 40-80 pts
+
+        # Si empieza igual
+        if name_clean.startswith(q_clean) or q_clean.startswith(name_clean):
+            pts = max(pts, 70)
+
+        # Bonus por palabras en común
+        q_words = set(q_clean.split())
+        name_words = set(name_clean.split())
+        common = q_words & name_words
+        if q_words and common:
+            word_ratio = len(common) / len(q_words)
+            pts = max(pts, 30 + word_ratio * 50)  # 30-80
+
+        return pts
+
+    # ─── Búsqueda inteligente (contexto artistas) ─────────────
 
     def _remember_artist(self, artist_str: str):
         """Guarda artistas recientes para contexto de búsqueda."""
@@ -330,29 +446,35 @@ class SpotifyClient:
             return m.group(1).strip(), m.group(2).strip()
         return query, None
 
+    # Regex para limpiar prefijos de playlist del query
+    _PLAYLIST_PREFIX_RE = re.compile(
+        r"^(?:la\s+)?(?:playlist|lista)\s+(?:de\s+)?",
+        re.IGNORECASE,
+    )
+
     def _smart_search(self, query: str) -> dict | None:
         """
         Busca inteligentemente en Spotify usando contexto de escucha reciente.
-        1. Parsea "canción DE artista" si hay pista explícita
-        2. Si el query es genérico, complementa con artista reciente
-        3. Busca múltiples resultados y elige el mejor con scoring
+        1. Detecta intención (playlist/album/track)
+        2. Para playlists: busca en las del usuario primero, luego global
+        3. Para tracks: usa contexto de artistas recientes
         """
         sp = self._ensure_auth()
         q_lower = query.lower()
 
-        # Detectar intención de playlist/album
+        # ─── Playlist ────────────────────────────────────────
         if any(kw in q_lower for kw in ["playlist", "lista"]):
-            results = sp.search(q=query, limit=1, type="playlist")
-            items = results.get("playlists", {}).get("items", [])
-            if items:
-                return {"type": "playlist", "uri": items[0]["uri"], "name": items[0]["name"]}
+            return self._search_playlist(query) or None
 
+        # ─── Album ────────────────────────────────────────────
         if any(kw in q_lower for kw in ["album", "disco", "álbum"]):
-            results = sp.search(q=query, limit=1, type="album")
+            clean = re.sub(r"\b(?:album|disco|álbum)\b", "", query, flags=re.IGNORECASE).strip()
+            results = sp.search(q=clean or query, limit=10, type="album")
             items = results.get("albums", {}).get("items", [])
             if items:
-                artist = ", ".join(a["name"] for a in items[0]["artists"])
-                return {"type": "album", "uri": items[0]["uri"], "name": items[0]["name"], "artist": artist}
+                best = self._best_name_match(clean or query, items)
+                artist = ", ".join(a["name"] for a in best["artists"])
+                return {"type": "album", "uri": best["uri"], "name": best["name"], "artist": artist}
 
         # ─── Búsqueda de track con contexto ───────────────────
 
