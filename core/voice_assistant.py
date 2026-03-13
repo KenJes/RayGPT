@@ -1,21 +1,25 @@
 """
-voice_assistant.py — Asistente de voz tipo Alexa para Raymundo.
+voice_assistant.py — R.E.I.N.A. · Asistente de voz estilo Alexa.
 
-Escucha continuamente con el micrófono, detecta la wake word "Raymundo"
-(o variantes), captura el comando que sigue, lo procesa con el cerebro
-de Raymundo, y responde con voz.
+    R.E.I.N.A.  —  Raymundo's Enhanced Intelligent Neural Assistant
+    La contraparte femenina de Raymundo (Rey → Reina).
+
+Escucha continuamente con el micrófono, detecta la wake word "Reina"
+(o "Raymundo" como alias), captura el comando que sigue, lo procesa
+con el cerebro agéntico, y responde con voz neural (Edge TTS · Dalia).
 
 Ciclo principal:
-    1. Escucha corta (3s) → Whisper STT
-    2. ¿Contiene "Raymundo"? → Sonido de activación
+    1. Escucha corta (4s) → Whisper STT
+    2. ¿Contiene "Reina" / "Raymundo"? → Sonido de activación
     3. Escucha larga (8s) → Captura el comando
     4. Procesar con chat_hibrido / AgentLoop / Spotify
-    5. TTS → Responder con voz
+    5. TTS (Edge TTS DaliaNeural) → Responder con voz
     6. Repetir
 
 Uso:
     python -m core.voice_assistant
     o desde rAImundoGPT exe.bat --voice
+    o Reina Voz.bat
 """
 
 from __future__ import annotations
@@ -56,7 +60,8 @@ except ImportError:
 # Wake-word patterns
 # ──────────────────────────────────────────────────────────────
 _WAKE_RE = re.compile(
-    r"\b(ray\s*mundo|ray|rai\s*mundo|raimundo|reimundo|rai)\b",
+    r"\b(reina|reynah?|rei\s*na"
+    r"|ray\s*mundo|ray|rai\s*mundo|raimundo|reimundo|rai)\b",
     re.IGNORECASE,
 )
 
@@ -75,8 +80,8 @@ def _split_after_wake(text: str) -> tuple[bool, str]:
 
 class VoiceAssistant:
     """
-    Asistente de voz hands-free estilo Alexa.
-    Escucha continuamente → detecta "Raymundo" → ejecuta comando → responde.
+    R.E.I.N.A. — Raymundo's Enhanced Intelligent Neural Assistant.
+    Asistente de voz hands-free: escucha → detecta "Reina" → ejecuta → responde.
     """
 
     # Configuración de audio
@@ -125,7 +130,7 @@ class VoiceAssistant:
         self._running = True
         self._thread = threading.Thread(target=self._loop, daemon=True, name="VoiceAssistant")
         self._thread.start()
-        logger.info("🎙️ Asistente de voz iniciado — di 'Raymundo' para activar")
+        logger.info("🎙️ R.E.I.N.A. iniciada — di 'Reina' para activar")
 
     def stop(self):
         """Detiene el asistente."""
@@ -149,7 +154,7 @@ class VoiceAssistant:
 
     def _loop(self):
         """Ciclo principal: escucha → detecta → procesa → responde."""
-        logger.info("👂 Esperando wake word 'Raymundo'...")
+        logger.info("👂 Esperando wake word 'Reina'...")
         self.on_idle()
 
         while self._running:
@@ -297,8 +302,9 @@ def _run_standalone():
     )
 
     print("=" * 60)
-    print("  🎙️  RAYMUNDO — Asistente de Voz")
-    print("  Di 'Raymundo' seguido de tu comando")
+    print("  👑  R.E.I.N.A. — Asistente de Voz")
+    print("  Raymundo's Enhanced Intelligent Neural Assistant")
+    print("  Di 'Reina' seguido de tu comando (o 'Raymundo')")
     print("  Ctrl+C para salir")
     print("=" * 60)
 
@@ -446,7 +452,7 @@ def _run_standalone():
         print("🧠 Pensando...")
 
     def on_idle():
-        print("💤 Esperando... (di 'Raymundo')")
+        print("💤 Esperando... (di 'Reina')")
 
     # ── Crear y arrancar ──────────────────────────────────────
     assistant = VoiceAssistant(
@@ -467,7 +473,7 @@ def _run_standalone():
         while assistant.is_running:
             time.sleep(0.5)
     except KeyboardInterrupt:
-        print("\n\n👋 Apagando asistente de voz...")
+        print("\n\n👋 Apagando R.E.I.N.A....")
         assistant.stop()
         print("✅ Adiós!")
 

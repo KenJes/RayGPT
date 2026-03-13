@@ -1,6 +1,8 @@
 """
-🎙️ MÓDULO DE AUDIO - RAYMUNDO
+🎙️ MÓDULO DE AUDIO - REINA / RAYMUNDO
 Gestión de texto a voz y voz a texto
+- Edge TTS: Voces neurales de Microsoft (DaliaNeural es-MX) — calidad TikTok/CapCut
+- pyttsx3: Voces del sistema (SAPI5 + OneCore)
 - Piper TTS: Síntesis de voz local y rápida
 - OpenAI Whisper: Reconocimiento de voz
 
@@ -60,6 +62,13 @@ except ImportError:
     PYTTSX3_AVAILABLE = False
     print("⚠️ pyttsx3 no instalado. Instala con: pip install pyttsx3")
 
+try:
+    import edge_tts
+    import asyncio
+    EDGE_TTS_AVAILABLE = True
+except ImportError:
+    EDGE_TTS_AVAILABLE = False
+
 
 class AudioHandler:
     """Maneja todas las operaciones de audio del agente"""
@@ -77,10 +86,23 @@ class AudioHandler:
         
         # Configuración de voz por defecto
         self.voice_config = voice_config or {
-            'engine': 'pyttsx3',  # pyttsx3 (mejor calidad) > gtts > piper
-            'gender': 'male',      # male | female
+            'engine': 'edge-tts',  # edge-tts (neural, mejor) > pyttsx3 > piper > gtts
+            'gender': 'female',    # female=Dalia | male=Jorge (para edge-tts)
             'rate': 180            # Velocidad: 150=lento, 180=normal, 200=rápido
         }
+        
+        # Voces neurales de Edge TTS (es-MX)
+        self._edge_voice_es = None
+        self._edge_voice_en = None
+        if EDGE_TTS_AVAILABLE:
+            gender = self.voice_config.get('gender', 'female').lower()
+            if gender == 'female':
+                self._edge_voice_es = 'es-MX-DaliaNeural'
+                self._edge_voice_en = 'en-US-JennyNeural'
+            else:
+                self._edge_voice_es = 'es-MX-JorgeNeural'
+                self._edge_voice_en = 'en-US-GuyNeural'
+            print(f"✅ Edge TTS configurado: {self._edge_voice_es}")
         
         # Estado de grabación
         self.is_recording = False
@@ -310,10 +332,32 @@ class AudioHandler:
             print(f"⚠️ Error inicializando Whisper: {e}")
             self.whisper_model = None
     
+    def _tts_edge(self, text: str, output_file: str, language: str = 'es') -> Optional[str]:
+        """Genera audio con Edge TTS (voces neurales, requiere internet)."""
+        voice = self._edge_voice_en if language == 'en' else self._edge_voice_es
+        if not voice:
+            return None
+        try:
+            communicate = edge_tts.Communicate(text, voice)
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+            if loop and loop.is_running():
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    pool.submit(asyncio.run, communicate.save(output_file)).result()
+            else:
+                asyncio.run(communicate.save(output_file))
+            return output_file
+        except Exception as e:
+            print(f"⚠️ Error en Edge TTS: {e}")
+            return None
+
     def text_to_speech(self, text: str, output_file: Optional[str] = None, language: str = 'es') -> Optional[str]:
         """
         Convierte texto a audio usando el mejor motor disponible
-        Prioridad: pyttsx3 (mejor calidad) > Piper (local rápido) > gTTS (fallback)
+        Prioridad: Edge TTS (neural) > pyttsx3 > Piper (local) > gTTS (fallback)
         
         Args:
             text: Texto a convertir
@@ -323,7 +367,17 @@ class AudioHandler:
         Returns:
             Ruta del archivo de audio generado o None si falló
         """
-        # 1. Intentar con pyttsx3 primero (mejor calidad, voces del sistema)
+        # 1. Intentar con Edge TTS primero (voces neurales, calidad TikTok)
+        if EDGE_TTS_AVAILABLE and self._edge_voice_es:
+            if not output_file:
+                output_file = str(self.audio_dir / f"tts_{os.getpid()}_{int(os.times()[4]*1000)}.mp3")
+            result = self._tts_edge(text, output_file, language)
+            if result:
+                print(f"✅ Audio generado con Edge TTS: {output_file}")
+                return result
+            print("⚠️ Edge TTS falló, intentando con pyttsx3...")
+
+        # 2. Intentar con pyttsx3 (voces del sistema, offline)
         if PYTTSX3_AVAILABLE and self.pyttsx3_engine:
             try:
                 if not output_file:
@@ -362,7 +416,7 @@ class AudioHandler:
             except Exception as e:
                 print(f"⚠️ Error en pyttsx3: {e}, intentando con Piper...")
         
-        # 2. Intentar con Piper (más rápido y local si tiene modelo)
+        # 3. Intentar con Piper (más rápido y local si tiene modelo)
         if PIPER_AVAILABLE and self.piper_voice:
             try:
                 if not output_file:
@@ -378,7 +432,7 @@ class AudioHandler:
             except Exception as e:
                 print(f"⚠️ Error en Piper TTS: {e}, intentando con gTTS...")
         
-        # 3. Fallback a gTTS (requiere internet pero siempre funciona)
+        # 4. Fallback a gTTS (requiere internet pero siempre funciona)
         if GTTS_AVAILABLE:
             try:
                 if not output_file:
@@ -396,7 +450,7 @@ class AudioHandler:
                 print(f"❌ Error en gTTS: {e}")
                 return None
         
-        print("❌ No hay sistema TTS disponible (ni pyttsx3 ni Piper ni gTTS)")
+        print("❌ No hay sistema TTS disponible (ni Edge TTS, pyttsx3, Piper ni gTTS)")
         return None
     
     def play_audio(self, audio_file: str) -> bool:
@@ -577,8 +631,8 @@ class AudioHandler:
             print(f"⚠️ Error limpiando archivos: {e}")
     
     def is_tts_available(self) -> bool:
-        """Verifica si TTS está disponible (pyttsx3, Piper o gTTS)"""
-        return PYTTSX3_AVAILABLE or (PIPER_AVAILABLE and self.piper_voice is not None) or GTTS_AVAILABLE
+        """Verifica si TTS está disponible"""
+        return EDGE_TTS_AVAILABLE or PYTTSX3_AVAILABLE or (PIPER_AVAILABLE and self.piper_voice is not None) or GTTS_AVAILABLE
     
     def is_stt_available(self) -> bool:
         """Verifica si STT está disponible"""
