@@ -319,7 +319,8 @@ Sin markdown extra, sin explicaciones fuera del JSON."""
     # ───── Chat híbrido (Smart Routing) ────────────────────────
 
     def chat_hibrido(self, mensaje, idioma_override=None,
-                     user_name=None, user_id=None, tono_override=None, usuario_agresivo=False):
+                     user_name=None, user_id=None, tono_override=None, usuario_agresivo=False,
+                     history=None):
         idioma = idioma_override or self.detector_idioma.detectar(mensaje)
         if idioma == "en":
             prompt_sistema = config_agente.get_prompt_sistema_en()
@@ -359,10 +360,19 @@ Sin markdown extra, sin explicaciones fuera del JSON."""
         if vocab_hint:
             prompt_sistema += vocab_hint
 
-        messages = [
-            {"role": "system", "content": prompt_sistema},
-            {"role": "user", "content": mensaje},
-        ]
+        # Construir messages con historial de conversación
+        messages = [{"role": "system", "content": prompt_sistema}]
+        if history:
+            messages.extend(history)
+        messages.append({"role": "user", "content": mensaje})
+
+        # Para Ollama (que usa prompt plano), construir texto con contexto
+        history_text = ""
+        if history:
+            for msg in history[-10:]:  # Últimos 10 mensajes para el prompt plano
+                role_label = "Usuario" if msg["role"] == "user" else "Asistente"
+                history_text += f"{role_label}: {msg['content']}\n"
+
         temporalidad = self.detector_temporal.detectar(mensaje)
 
         if temporalidad == "actual":
@@ -375,14 +385,14 @@ Sin markdown extra, sin explicaciones fuera del JSON."""
                 if r:
                     return r
             r = self.ollama.generate(
-                f"{prompt_sistema}\n\nUsuario: {mensaje}\nAsistente:",
+                f"{prompt_sistema}\n\n{history_text}Usuario: {mensaje}\nAsistente:",
                 temperature=0.7,
                 max_tokens=500,
             )
             return f"⚠️ *[Modo local]*\n\n{r or 'Error al conectar con Ollama'}"
         else:
             r = self.ollama.generate(
-                f"{prompt_sistema}\n\nUsuario: {mensaje}\nAsistente:",
+                f"{prompt_sistema}\n\n{history_text}Usuario: {mensaje}\nAsistente:",
                 temperature=0.7, max_tokens=2000,
             )
             if r:

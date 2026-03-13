@@ -127,9 +127,14 @@ class AgentLoop:
         user_id: str | None = None,
         tono_override: str | None = None,
         usuario_agresivo: bool = False,
+        conversation_history: list[dict] | None = None,
     ) -> dict:
         """
         Ejecuta el ciclo agéntico para una meta.
+
+        Args:
+            conversation_history: Mensajes previos del usuario (resúmenes + recientes)
+                                  para dar contexto de la conversación.
 
         Returns:
             {
@@ -163,11 +168,14 @@ class AgentLoop:
                 "espeja su tono, groserías con groserías, sin perder utilidad."
             )
 
-        # 3. Iniciar conversación con el LLM
+        # 3. Iniciar conversación con el LLM (incluir historial de conversación)
         messages = [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"Meta: {goal}"},
         ]
+        # Inyectar historial de conversación previo para contexto
+        if conversation_history:
+            messages.extend(conversation_history)
+        messages.append({"role": "user", "content": f"Meta: {goal}"})
 
         actions_log = []
         step = 0

@@ -52,6 +52,7 @@ from core.agent_loop import AgentLoop, es_meta_compleja
 from core.agent_logger import AgentLogger
 from core.agent_memory import VectorMemory
 from core.approval import approval_manager
+from core.conversation_db import ConversationDB
 
 # ====================================
 # CONFIGURACIÓN DE FLASK
@@ -154,40 +155,48 @@ except Exception as e:
     sys.exit(1)
 
 # ====================================
-# CACHE DE CONVERSACIONES
+# BASE DE DATOS DE CONVERSACIONES (SQLite persistente)
 # ====================================
 
-# Diccionario para mantener historial por usuario
-# Formato: {user_id: [{"role": "user", "content": "..."}, ...]}
-conversaciones = {}
-MAX_HISTORY = 10  # Últimos N mensajes por usuario
+conversation_db = ConversationDB()  # data/conversaciones.db — sobrevive reinicios
+logger.info("✅ Base de datos de conversaciones inicializada (SQLite)")
+
+# Dict en RAM solo para cosas efímeras (idioma override por sesión)
+conversaciones = {}  # Solo para idioma_override
 
 # Personalidad y nombre por usuario (override independiente por sesión)
-# Formato: {user_id: {"tono": "puteado"|"amigable", "idioma": "es"|"en"}}
 personalidades_por_usuario = {}
 
 # Nombres de contacto conocidos
-# Formato: {user_id: "Nombre"}
 nombres_contactos = {}
 
+
+def _summarize_fn(prompt: str) -> str:
+    """Función para resumir historial viejo usando la cadena de IA."""
+    try:
+        return gestor._consultar_ia(prompt, temperature=0.3, max_tokens=500)
+    except Exception:
+        return ""
+
+
 def get_historial(user_id):
-    """Obtiene el historial de un usuario"""
-    if user_id not in conversaciones:
-        conversaciones[user_id] = []
-    return conversaciones[user_id]
+    """Obtiene el historial reciente de un usuario desde SQLite."""
+    return conversation_db.get_history(user_id)
+
+
+def get_contexto_completo(user_id):
+    """Obtiene historial + resúmenes de conversaciones anteriores para el LLM."""
+    return conversation_db.build_context_messages(user_id, summarize_fn=_summarize_fn)
+
 
 def agregar_mensaje(user_id, role, content):
-    """Agrega un mensaje al historial"""
-    historial = get_historial(user_id)
-    historial.append({"role": role, "content": content})
-    # Limitar tamaño del historial
-    if len(historial) > MAX_HISTORY * 2:  # *2 porque son pares usuario-asistente
-        conversaciones[user_id] = historial[-MAX_HISTORY * 2:]
+    """Guarda un mensaje en la BD persistente."""
+    conversation_db.add_message(user_id, role, content)
+
 
 def limpiar_historial(user_id):
-    """Limpia el historial de un usuario"""
-    if user_id in conversaciones:
-        del conversaciones[user_id]
+    """Limpia el historial de un usuario."""
+    conversation_db.clear_history(user_id)
 
 def get_tono_usuario(user_id):
     """Devuelve el tono activo para un usuario (per-user override o global)."""
@@ -436,15 +445,22 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
         if es_meta_compleja(mensaje_limpio):
             logger.info(f"🧠 [{user_name or user_id}] Meta compleja detectada → AgentLoop")
             try:
+                # Obtener contexto de conversación previo para el agente
+                conv_context = get_contexto_completo(user_id)
                 resultado_agente = agent_loop.run(
                     goal=mensaje_limpio,
                     user_name=user_name,
                     user_id=user_id,
                     tono_override=get_tono_usuario(user_id),
                     usuario_agresivo=usuario_agresivo,
+                    conversation_history=conv_context,
                 )
                 respuesta = resultado_agente["response"]
                 tiempo_respuesta = time.time() - tiempo_inicio
+
+                # Guardar en BD persistente
+                agregar_mensaje(user_id, "user", mensaje_limpio)
+                agregar_mensaje(user_id, "assistant", respuesta)
 
                 # Rastrear métricas
                 tokens_groq = groq.last_tokens_used if groq and groq.client else 0
@@ -569,6 +585,10 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
             logger.info(f"✅ Respuesta generada ({len(respuesta)} caracteres)")
             logger.info(f"   • Tiempo: {tiempo_respuesta:.2f}s | Groq: {tokens_groq} | GPT-4o: {tokens_gpt4o} | Ollama: {tokens_ollama}")
             
+            # Guardar en BD persistente
+            agregar_mensaje(user_id, "user", mensaje_limpio)
+            agregar_mensaje(user_id, "assistant", respuesta)
+
             # Preparar respuesta JSON limpia
             response_data = {
                 "respuesta": respuesta,
@@ -584,6 +604,8 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
         else:
             # Usar chat híbrido normal con soporte bilingüe
             idioma_override = conversaciones.get('idioma_override', {}).get(user_id)
+            # Obtener historial completo (resúmenes + mensajes recientes)
+            conv_context = get_contexto_completo(user_id)
             respuesta = gestor.chat_hibrido(
                 mensaje,
                 idioma_override=idioma_override,
@@ -591,6 +613,7 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
                 user_id=user_id,
                 tono_override=get_tono_usuario(user_id),
                 usuario_agresivo=usuario_agresivo,
+                history=conv_context,
             )
             
             # Calcular tiempo de respuesta
@@ -629,6 +652,10 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
             logger.info(f"✅ Respuesta generada ({len(respuesta)} caracteres)")
             logger.info(f"   • Tiempo: {tiempo_respuesta:.2f}s | Groq: {tokens_groq} | GPT-4o: {tokens_gpt4o} | Ollama: {tokens_ollama}")
             
+            # Guardar en BD persistente
+            agregar_mensaje(user_id, "user", mensaje_limpio)
+            agregar_mensaje(user_id, "assistant", respuesta)
+
             return jsonify({
                 "respuesta": respuesta,
                 "user_id": user_id
@@ -710,9 +737,8 @@ def stats():
         # Formato JSON
         stats_data = metrics.get_stats()
         stats_data['conversaciones'] = {
-            "activas": len(conversaciones),
-            "total_mensajes": sum(len(hist) for hist in conversaciones.values()),
-            "usuarios": list(conversaciones.keys())
+            "tipo_almacenamiento": "SQLite persistente",
+            "db_path": str(conversation_db._db_path),
         }
         return jsonify(stats_data)
 @app.route('/metrics/reset', methods=['POST'])
@@ -911,8 +937,8 @@ def audio_chat():
         if resultado_herramienta['ejecuto_herramienta']:
             respuesta = resultado_herramienta['resultado']
         else:
-            # Chat normal with bilingual routing
-            historial = get_historial(user_id)
+            # Chat normal with bilingual routing — usar historial persistente
+            conv_context = get_contexto_completo(user_id)
             
             # Detectar idioma para seleccionar prompt
             idioma_override = conversaciones.get('idioma_override', {}).get(user_id)
@@ -929,7 +955,7 @@ def audio_chat():
                 prompt_sistema = config_agente.get('personalidad', {}).get('prompt_sistema', '')
             
             messages = [{"role": "system", "content": prompt_sistema}]
-            messages.extend(historial[-10:])
+            messages.extend(conv_context)
             messages.append({"role": "user", "content": texto})
             
             respuesta_ai = groq.chat(messages) or github.chat(messages) or ollama.generate(prompt_sistema + "\n\n" + texto)
