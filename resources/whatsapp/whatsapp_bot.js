@@ -114,10 +114,15 @@ client.on('message_create', async message => {
     return;
   }
 
-  // Detectar si es un mensaje de voz
+  // Detectar si es un mensaje de voz → procesar con STT + AI + TTS
   if (message.type === 'ptt' || message.type === 'audio') {
-    console.log(`🎤 Mensaje de voz recibido - fromMe: ${message.fromMe}, from: ${message.from}`);
-    console.log(`⚠️  Mensaje de voz ignorado (usa comandos de texto para activar el bot)`);
+    if (message.fromMe) return;  // Ignorar audios propios
+    console.log(`🎤 Mensaje de voz recibido de ${message.from}`);
+    const chatId = message.from;
+    const userId = chatId;
+    const contact = await message.getContact();
+    const userName = contact?.pushname || contact?.name || userId;
+    await manejarMensajeVoz(message, chatId, userId, userName);
     return;
   }
 

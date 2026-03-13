@@ -630,6 +630,19 @@ class AudioHandler:
         except Exception as e:
             print(f"⚠️ Error limpiando archivos: {e}")
     
+    def set_gender(self, gender: str):
+        """Cambia la voz entre masculina (Jorge) y femenina (Dalia) en caliente."""
+        gender = gender.lower()
+        self.voice_config['gender'] = gender
+        if EDGE_TTS_AVAILABLE:
+            if gender == 'female':
+                self._edge_voice_es = 'es-MX-DaliaNeural'
+                self._edge_voice_en = 'en-US-JennyNeural'
+            else:
+                self._edge_voice_es = 'es-MX-JorgeNeural'
+                self._edge_voice_en = 'en-US-GuyNeural'
+            print(f"✅ Voz cambiada a: {self._edge_voice_es}")
+
     def is_tts_available(self) -> bool:
         """Verifica si TTS está disponible"""
         return EDGE_TTS_AVAILABLE or PYTTSX3_AVAILABLE or (PIPER_AVAILABLE and self.piper_voice is not None) or GTTS_AVAILABLE

@@ -378,8 +378,27 @@ def _run_standalone():
     # ── Función de procesamiento ──────────────────────────────
     user_id = "voice_local"
 
+    # ── Regex para cambio de voz ────────────────────────────
+    _SWITCH_RE = re.compile(
+        r"(?:cambia(?:r|te)?|pon(?:me|te)?|usa(?:r)?|switch|quiero)\s+"
+        r"(?:a\s+|la\s+|el\s+)?(?:voz\s+(?:de\s+)?)?"
+        r"(reina|dalia|jorge|raymundo|masculin[oa]|femenin[oa]|hombre|mujer)",
+        re.IGNORECASE,
+    )
+
     def process_command(command: str) -> str:
         """Procesa un comando de voz y devuelve la respuesta en texto."""
+        # 0. Cambio de voz
+        sw = _SWITCH_RE.search(command)
+        if sw:
+            quien = sw.group(1).lower()
+            if quien in ('reina', 'dalia', 'femenina', 'femenino', 'mujer'):
+                audio.set_gender('female')
+                return "Listo, ahora soy Reina. ¿Qué necesitas?"
+            else:
+                audio.set_gender('male')
+                return "Qué onda, ahora soy Jorge. ¿En qué te ayudo?"
+
         # Guardar en historial
         agregar_mensaje(user_id, "user", command)
 

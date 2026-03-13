@@ -112,12 +112,11 @@ try:
     # Inicializar metrics tracker
     metrics = MetricsTracker(str(METRICS_FILE))
     
-    # Inicializar manejador de audio con voz masculina
-    # Si no hay voz masculina en español, usará la mejor disponible
+    # Inicializar manejador de audio con voz masculina (Edge TTS Jorge Neural)
     audio_handler = get_audio_handler(voice_config={
-        'engine': 'pyttsx3',  # pyttsx3 (mejor calidad) > gtts
-        'gender': 'male',     # Voz masculina (si está instalada)
-        'rate': 200           # Velocidad: 150=lento, 180=normal, 200=rápido, 220=muy rápido
+        'engine': 'edge-tts',  # edge-tts (neural, calidad TikTok) > pyttsx3 > gtts
+        'gender': 'male',      # male=JorgeNeural | female=DaliaNeural
+        'rate': 180            # Velocidad: 150=lento, 180=normal, 200=rápido
     })
     logger.info("✅ Manejador de audio inicializado")
     
