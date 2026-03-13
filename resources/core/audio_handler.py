@@ -93,6 +93,7 @@ class AudioHandler:
         self.pyttsx3_engine = None
         self.voice_es = None  # Voice ID para español
         self.voice_en = None  # Voice ID para inglés
+        self._voice_es_is_onecore = False  # Voces OneCore no reportan bien en getProperty
         self._tts_lock = threading.Lock()  # Proteger pyttsx3 contra acceso concurrente
         
         if PYTTSX3_AVAILABLE:
@@ -105,7 +106,7 @@ class AudioHandler:
             self._init_whisper()
     
     def _init_pyttsx3(self):
-        """Inicializa el motor pyttsx3 con voces del sistema"""
+        """Inicializa el motor pyttsx3 con voces del sistema (SAPI5 + OneCore)"""
         try:
             self.pyttsx3_engine = pyttsx3.init()
             
@@ -120,47 +121,78 @@ class AudioHandler:
             voices = self.pyttsx3_engine.getProperty('voices')
             gender_pref = self.voice_config.get('gender', 'male').lower()
             
+            # ═══ DESCUBRIR VOCES ONECORE (Windows) ═══
+            # pyttsx3 solo lista SAPI5; OneCore tiene más voces (e.g. Raúl MX)
+            onecore_voices = self._discover_onecore_voices()
+            
             selected_voice = None
             
             # ═══ BUSCAR VOZ EN ESPAÑOL ═══
-            # Buscar voz en español mexicano primero (prioridad)
+            # Prioridad: 1) SAPI5 género preferido → 2) OneCore género preferido
+            #             3) SAPI5 cualquier español → 4) OneCore cualquier español
+            
+            # --- Paso 1: SAPI5 español, género preferido ---
             for voice in voices:
                 voice_name = voice.name.lower()
                 voice_id_lower = voice.id.lower()
                 
-                # Detectar voces mexicanas específicas (Raúl, Sabina)
                 if 'raul' in voice_name or 'raul' in voice_id_lower or 'sabina' in voice_name or 'sabina' in voice_id_lower:
                     is_male = 'raul' in voice_name or 'raul' in voice_id_lower
                     is_female = 'sabina' in voice_name or 'sabina' in voice_id_lower
                     
                     if gender_pref == 'male' and is_male:
                         selected_voice = voice.id
-                        print(f"✅ Voz masculina en español mexicano seleccionada: {voice.name}")
+                        print(f"✅ Voz masculina en español mexicano (SAPI5): {voice.name}")
                         break
                     elif gender_pref == 'female' and is_female:
                         selected_voice = voice.id
-                        print(f"✅ Voz femenina en español mexicano seleccionada: {voice.name}")
+                        print(f"✅ Voz femenina en español mexicano (SAPI5): {voice.name}")
                         break
             
-            # Si no hay mexicanas, buscar otras voces en español
+            # --- Paso 2: OneCore español, género preferido ---
+            if not selected_voice and onecore_voices:
+                for oc_name, oc_id in onecore_voices:
+                    name_l = oc_name.lower()
+                    id_l = oc_id.lower()
+                    is_spanish = 'esmx' in id_l or 'es-mx' in id_l or 'es_es' in id_l or 'es-es' in id_l
+                    if not is_spanish:
+                        continue
+                    is_male = 'raul' in name_l or 'raul' in id_l
+                    is_female = 'sabina' in name_l or 'sabina' in id_l
+                    
+                    if gender_pref == 'male' and is_male:
+                        selected_voice = oc_id
+                        self._voice_es_is_onecore = True
+                        print(f"✅ Voz masculina en español mexicano (OneCore): {oc_name}")
+                        break
+                    elif gender_pref == 'female' and is_female:
+                        selected_voice = oc_id
+                        self._voice_es_is_onecore = True
+                        print(f"✅ Voz femenina en español mexicano (OneCore): {oc_name}")
+                        break
+            
+            # --- Paso 3: SAPI5 cualquier español (ignorar género) ---
             if not selected_voice:
                 for voice in voices:
                     voice_name = voice.name.lower()
-                    
-                    # Detectar voces en español (cualquier variante)
-                    if 'spanish' in voice_name or 'español' in voice_name or 'helena' in voice_name or 'pablo' in voice_name:
-                        # Detectar género por nombre
-                        is_male = any(keyword in voice_name for keyword in ['male', 'pablo', 'jorge', 'diego', 'carlos'])
-                        is_female = any(keyword in voice_name for keyword in ['female', 'helena', 'monica', 'lucia'])
-                        
-                        if gender_pref == 'male' and is_male:
-                            selected_voice = voice.id
-                            print(f"✅ Voz masculina en español seleccionada: {voice.name}")
-                            break
-                        elif gender_pref == 'female' and is_female:
-                            selected_voice = voice.id
-                            print(f"✅ Voz femenina en español seleccionada: {voice.name}")
-                            break
+                    voice_id_lower = voice.id.lower()
+                    is_spanish = any(kw in voice_name or kw in voice_id_lower for kw in
+                                     ['spanish', 'español', 'es-mx', 'es_mx', 'es-es',
+                                      'raul', 'sabina', 'helena', 'pablo', 'jorge'])
+                    if is_spanish:
+                        selected_voice = voice.id
+                        print(f"✅ Voz en español seleccionada (SAPI5, otro género): {voice.name}")
+                        break
+            
+            # --- Paso 4: OneCore cualquier español ---
+            if not selected_voice and onecore_voices:
+                for oc_name, oc_id in onecore_voices:
+                    id_l = oc_id.lower()
+                    if 'esmx' in id_l or 'es-mx' in id_l or 'es_es' in id_l or 'es-es' in id_l:
+                        selected_voice = oc_id
+                        self._voice_es_is_onecore = True
+                        print(f"✅ Voz en español seleccionada (OneCore, otro género): {oc_name}")
+                        break
             
             # Guardar voz en español
             self.voice_es = selected_voice
@@ -213,7 +245,36 @@ class AudioHandler:
             
         except Exception as e:
             print(f"⚠️ Error inicializando pyttsx3: {e}")
-            self.pyttsx3_engine = None
+    
+    @staticmethod
+    def _discover_onecore_voices():
+        """Descubre voces OneCore de Windows que pyttsx3 no lista por defecto."""
+        results = []
+        try:
+            import winreg
+            key = winreg.OpenKey(
+                winreg.HKEY_LOCAL_MACHINE,
+                r"SOFTWARE\Microsoft\Speech_OneCore\Voices\Tokens",
+            )
+            i = 0
+            while True:
+                try:
+                    token_name = winreg.EnumKey(key, i)
+                    token_path = rf"SOFTWARE\Microsoft\Speech_OneCore\Voices\Tokens\{token_name}"
+                    full_id = rf"HKEY_LOCAL_MACHINE\{token_path}"
+                    # Leer nombre legible
+                    try:
+                        sub = winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, token_path)
+                        display_name = winreg.QueryValueEx(sub, "")[0]
+                    except Exception:
+                        display_name = token_name
+                    results.append((display_name, full_id))
+                    i += 1
+                except OSError:
+                    break
+        except Exception:
+            pass  # No es Windows o no hay voces OneCore
+        return results
     
     def _init_piper(self):
         """Inicializa el modelo Piper TTS"""
@@ -279,14 +340,17 @@ class AudioHandler:
                     
                     if target_voice:
                         self.pyttsx3_engine.setProperty('voice', target_voice)
-                        # Verificar que la voz se aplicó correctamente (Windows bug)
-                        actual_voice = self.pyttsx3_engine.getProperty('voice')
-                        if actual_voice != target_voice:
-                            print(f"⚠️ Voz no aplicada (esperada: {target_voice}, actual: {actual_voice}). Re-inicializando engine...")
-                            self.pyttsx3_engine = pyttsx3.init()
-                            self.pyttsx3_engine.setProperty('rate', self.voice_config.get('rate', 180))
-                            self.pyttsx3_engine.setProperty('volume', 0.9)
-                            self.pyttsx3_engine.setProperty('voice', target_voice)
+                        # Voces OneCore no reportan correctamente en getProperty;
+                        # solo verificar para voces SAPI5 normales.
+                        is_onecore = 'Speech_OneCore' in target_voice
+                        if not is_onecore:
+                            actual_voice = self.pyttsx3_engine.getProperty('voice')
+                            if actual_voice != target_voice:
+                                print(f"⚠️ Voz no aplicada (esperada: {target_voice}, actual: {actual_voice}). Re-inicializando engine...")
+                                self.pyttsx3_engine = pyttsx3.init()
+                                self.pyttsx3_engine.setProperty('rate', self.voice_config.get('rate', 180))
+                                self.pyttsx3_engine.setProperty('volume', 0.9)
+                                self.pyttsx3_engine.setProperty('voice', target_voice)
                     
                     # Generar audio
                     self.pyttsx3_engine.save_to_file(text, output_file)
