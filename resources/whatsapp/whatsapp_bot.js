@@ -76,6 +76,10 @@ async function enviarMensajeAlServidor(texto, userId, userName, imageBase64 = nu
   if (imageBase64) {
     payload.image_base64 = imageBase64;
   }
+  if (global._lastMediaMimetype) {
+    payload.media_mimetype = global._lastMediaMimetype;
+    global._lastMediaMimetype = null;
+  }
 
   const { data } = await axios.post(CHAT_ENDPOINT, payload, {
     timeout: 60_000,
@@ -131,6 +135,7 @@ client.on('message_create', async message => {
         const media = await message.downloadMedia();
         if (media && media.data) {
           imageBase64 = media.data; // ya viene en base64
+          global._lastMediaMimetype = media.mimetype || null;
           console.log(`✅ Media descargada: ${media.mimetype}, ${Math.round(media.data.length * 3 / 4 / 1024)} KB`);
         }
       } catch (err) {

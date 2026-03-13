@@ -376,6 +376,7 @@ def chat():
         user_id = data.get('user_id', 'default')  # ID del usuario (opcional)
         user_name = data.get('user_name', '').strip() or None  # Nombre del contacto WA
         image_base64 = data.get('image_base64')  # Imagen adjunta en base64 (opcional)
+        media_mimetype = data.get('media_mimetype')  # MIME type del archivo adjunto
 
         # Guardar/actualizar nombre conocido del contacto
         if user_name and user_name != user_id:
@@ -493,12 +494,13 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
         # Detectar si el usuario está siendo agresivo en ESTE mensaje (no persistente)
         usuario_agresivo = detectar_agresividad_usuario(mensaje_limpio)
 
-        # ─── IMAGEN ADJUNTA: extraer texto con Vision OCR ─────────
+        # ─── MEDIA ADJUNTA: extraer texto (imagen o PDF) ─────────
         texto_imagen_extraido = None
         if image_base64:
-            logger.info(f"📸 [{user_name or user_id}] Imagen adjunta recibida, extrayendo texto...")
+            tipo_media = media_mimetype or 'desconocido'
+            logger.info(f"📎 [{user_name or user_id}] Media adjunta recibida ({tipo_media}), extrayendo texto...")
             try:
-                texto_imagen_extraido = gestor.vision.extract_text_from_base64(image_base64)
+                texto_imagen_extraido = gestor.vision.extract_text_from_base64(image_base64, mimetype=media_mimetype)
                 if texto_imagen_extraido and not texto_imagen_extraido.startswith("❌"):
                     logger.info(f"📝 Texto extraído de imagen: {len(texto_imagen_extraido)} chars")
                     mensaje_limpio = (
@@ -507,12 +509,14 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
                         f"{texto_imagen_extraido}"
                     )
                     # Guardar documento en la base de conocimiento
+                    is_pdf = media_mimetype and 'pdf' in media_mimetype.lower()
+                    doc_type = 'cv' if is_pdf else 'image'
                     try:
                         doc_id = knowledge_base.store_document(
                             user_id=user_id,
-                            doc_type="image",
+                            doc_type=doc_type,
                             content=texto_imagen_extraido,
-                            title=f"Imagen de {user_name or user_id}",
+                            title=f"{'PDF' if is_pdf else 'Imagen'} de {user_name or user_id}",
                             source="whatsapp",
                         )
                         logger.info(f"💾 Imagen guardada en KB (doc_id={doc_id})")

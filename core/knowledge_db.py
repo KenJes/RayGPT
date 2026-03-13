@@ -21,6 +21,7 @@ Uso:
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 import time
 from pathlib import Path
@@ -44,6 +45,17 @@ class KnowledgeBase:
         conn.execute("PRAGMA busy_timeout=5000")
         conn.row_factory = sqlite3.Row
         return conn
+
+    # Palabras funcionales cortas que no aportan a las búsquedas
+    _STOPWORDS = frozenset(
+        "de del la el los las un una unos unas en es que al por con para su"
+        " me te se lo le nos les a o y e ni si no mi tu como cual cuál".split()
+    )
+
+    def _extract_search_words(self, query: str) -> list[str]:
+        """Extrae palabras significativas del query para buscar en la BD."""
+        words = re.sub(r"[^a-záéíóúüñA-ZÁÉÍÓÚÜÑ0-9 ]", " ", query).split()
+        return [w for w in words if len(w) > 2 and w.lower() not in self._STOPWORDS]
 
     # ─── Inicialización ───────────────────────────────────────
 
@@ -196,14 +208,24 @@ class KnowledgeBase:
         return [dict(r) for r in rows]
 
     def search_documents(self, query: str, limit: int = 20) -> list[dict]:
-        """Búsqueda de texto en documentos."""
-        pattern = f"%{query}%"
+        """Búsqueda de texto en documentos. Busca por cada palabra del query."""
+        words = self._extract_search_words(query)
+        if not words:
+            return []
+        conditions = []
+        params = []
+        for w in words:
+            p = f"%{w}%"
+            conditions.append(
+                "(content LIKE ? OR person_name LIKE ? OR title LIKE ? OR evaluation LIKE ?)"
+            )
+            params.extend([p, p, p, p])
+        where = " OR ".join(conditions)
+        params.append(limit)
         with self._conn() as conn:
             rows = conn.execute(
-                """SELECT * FROM documents
-                   WHERE content LIKE ? OR person_name LIKE ? OR title LIKE ? OR evaluation LIKE ?
-                   ORDER BY timestamp DESC LIMIT ?""",
-                (pattern, pattern, pattern, pattern, limit),
+                f"SELECT * FROM documents WHERE {where} ORDER BY timestamp DESC LIMIT ?",
+                params,
             ).fetchall()
         return [dict(r) for r in rows]
 
@@ -301,15 +323,25 @@ class KnowledgeBase:
         return results
 
     def search_people(self, query: str, limit: int = 20) -> list[dict]:
-        """Busca personas por nombre, skills, rol, experiencia, etc."""
-        pattern = f"%{query}%"
+        """Busca personas por cada palabra del query (nombre, skills, rol, etc.)."""
+        words = self._extract_search_words(query)
+        if not words:
+            return []
+        conditions = []
+        params = []
+        for w in words:
+            p = f"%{w}%"
+            conditions.append(
+                "(name LIKE ? OR role LIKE ? OR skills LIKE ?"
+                " OR experience LIKE ? OR education LIKE ? OR notes LIKE ?)"
+            )
+            params.extend([p, p, p, p, p, p])
+        where = " OR ".join(conditions)
+        params.append(limit)
         with self._conn() as conn:
             rows = conn.execute(
-                """SELECT * FROM people
-                   WHERE name LIKE ? OR role LIKE ? OR skills LIKE ?
-                         OR experience LIKE ? OR education LIKE ? OR notes LIKE ?
-                   ORDER BY updated_at DESC LIMIT ?""",
-                (pattern, pattern, pattern, pattern, pattern, pattern, limit),
+                f"SELECT * FROM people WHERE {where} ORDER BY updated_at DESC LIMIT ?",
+                params,
             ).fetchall()
         results = []
         for row in rows:
@@ -353,13 +385,21 @@ class KnowledgeBase:
         return [dict(r) for r in rows]
 
     def search_facts(self, query: str, limit: int = 30) -> list[dict]:
-        pattern = f"%{query}%"
+        words = self._extract_search_words(query)
+        if not words:
+            return []
+        conditions = []
+        params = []
+        for w in words:
+            p = f"%{w}%"
+            conditions.append("(fact LIKE ? OR person_name LIKE ?)")
+            params.extend([p, p])
+        where = " OR ".join(conditions)
+        params.append(limit)
         with self._conn() as conn:
             rows = conn.execute(
-                """SELECT * FROM facts
-                   WHERE fact LIKE ? OR person_name LIKE ?
-                   ORDER BY timestamp DESC LIMIT ?""",
-                (pattern, pattern, limit),
+                f"SELECT * FROM facts WHERE {where} ORDER BY timestamp DESC LIMIT ?",
+                params,
             ).fetchall()
         return [dict(r) for r in rows]
 

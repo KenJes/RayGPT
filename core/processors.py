@@ -73,13 +73,39 @@ class VisionProcessor:
         except Exception as e:
             return f"❌ Error OCR: {e}"
 
-    def extract_text_from_base64(self, b64_data: str) -> str:
-        """Extrae texto de una imagen base64. Usa Tesseract local."""
+    def extract_text_from_base64(self, b64_data: str, mimetype: str | None = None) -> str:
+        """Extrae texto de media base64. Detecta PDF vs imagen automáticamente."""
         try:
-            img = self._b64_to_pil(b64_data)
+            raw = base64.b64decode(b64_data)
+            is_pdf = (
+                (mimetype and "pdf" in mimetype.lower())
+                or raw[:5] == b"%PDF-"
+            )
+            if is_pdf:
+                return self._extract_text_from_pdf_bytes(raw)
+            img = Image.open(io.BytesIO(raw))
             return self._ocr_local(img)
         except Exception as e:
             return f"❌ Error OCR: {e}"
+
+    def _extract_text_from_pdf_bytes(self, pdf_bytes: bytes) -> str:
+        """Extrae texto de bytes de un PDF usando PyPDF2."""
+        try:
+            import PyPDF2
+        except ImportError:
+            return "❌ PyPDF2 no instalado. Ejecuta: pip install pypdf2"
+        reader = PyPDF2.PdfReader(io.BytesIO(pdf_bytes))
+        pages_text = []
+        for page in reader.pages[:50]:
+            t = page.extract_text()
+            if t:
+                pages_text.append(t)
+            if sum(len(p) for p in pages_text) > 50000:
+                break
+        text = "\n\n".join(pages_text).strip()
+        if not text:
+            return "❌ No se detectó texto en el PDF"
+        return text
 
     def save_base64_to_temp(self, b64_data: str, suffix: str = ".jpg") -> str:
         """Guarda datos base64 en un archivo temporal y devuelve la ruta."""
