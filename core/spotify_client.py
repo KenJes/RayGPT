@@ -286,12 +286,12 @@ class SpotifyClient:
                 return {"type": "album", "uri": items[0]["uri"], "name": items[0]["name"], "artist": artist}
 
         # Por defecto: buscar canción primero, luego artista
-        results = sp.search(q=query, limit=1, type="track")
+        results = sp.search(q=query, limit=10, type="track")
         tracks = results.get("tracks", {}).get("items", [])
         if tracks:
-            t = tracks[0]
-            artist = ", ".join(a["name"] for a in t["artists"])
-            return {"type": "track", "uri": t["uri"], "name": t["name"], "artist": artist}
+            best = self._best_track_match(query, tracks)
+            artist = ", ".join(a["name"] for a in best["artists"])
+            return {"type": "track", "uri": best["uri"], "name": best["name"], "artist": artist}
 
         # Si no hay canción, buscar artista
         results = sp.search(q=query, limit=1, type="artist")
@@ -300,6 +300,36 @@ class SpotifyClient:
             return {"type": "artist", "uri": artists[0]["uri"], "name": artists[0]["name"]}
 
         return None
+
+    @staticmethod
+    def _best_track_match(query: str, tracks: list) -> dict:
+        """
+        De una lista de tracks de Spotify elige el que más se parece al query.
+        Prioridad: coincidencia exacta del nombre > empieza igual > contiene query > primero.
+        """
+        import unicodedata
+
+        def normalize(s: str) -> str:
+            s = s.lower().strip()
+            s = unicodedata.normalize("NFD", s)
+            s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+            return s
+
+        q = normalize(query)
+
+        def score(t):
+            name = normalize(t["name"])
+            if name == q:
+                return 4
+            if name.startswith(q):
+                return 3
+            if q.startswith(name):
+                return 2
+            if q in name:
+                return 1
+            return 0
+
+        return max(tracks, key=score)
 
     # ─── Utilidades ───────────────────────────────────────────
 
