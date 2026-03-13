@@ -24,7 +24,10 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
+import unicodedata
+from collections import deque
 from pathlib import Path
 
 import spotipy
@@ -49,10 +52,18 @@ _SCOPES = " ".join([
 class SpotifyClient:
     """Cliente de Spotify con OAuth persistente y control de reproducción."""
 
+    # Regex para detectar "canción DE artista" en el query
+    _DE_ARTIST_RE = re.compile(
+        r"^(.+?)\s+(?:de|by|of)\s+(.+)$", re.IGNORECASE
+    )
+
     def __init__(self, client_id: str, client_secret: str, redirect_uri: str):
         self.client_id = client_id
         self.client_secret = client_secret
         self.redirect_uri = redirect_uri
+
+        # Contexto de escucha reciente (últimos 5 artistas)
+        self._recent_artists: deque[str] = deque(maxlen=5)
 
         self._oauth = SpotifyOAuth(
             client_id=client_id,
@@ -82,6 +93,7 @@ class SpotifyClient:
                     return
             self._sp = spotipy.Spotify(auth=token_info["access_token"])
             logger.info("✅ Spotify conectado (token cargado)")
+            self._load_recent_context()
 
     @property
     def is_authenticated(self) -> bool:
@@ -97,6 +109,7 @@ class SpotifyClient:
             token_info = self._oauth.get_access_token(code, as_dict=True)
             self._sp = spotipy.Spotify(auth=token_info["access_token"])
             logger.info("✅ Spotify autenticado exitosamente")
+            self._load_recent_context()
             return True
         except Exception as e:
             logger.error(f"❌ Error autenticando Spotify: {e}")
@@ -135,16 +148,19 @@ class SpotifyClient:
             if tipo == "track":
                 sp.start_playback(uris=[uri], device_id=device_id)
                 artist = result.get("artist", "")
+                self._remember_artist(artist)
                 return f"🎵 Reproduciendo: **{nombre}** — {artist}"
             elif tipo == "album":
                 sp.start_playback(context_uri=uri, device_id=device_id)
                 artist = result.get("artist", "")
+                self._remember_artist(artist)
                 return f"💿 Reproduciendo álbum: **{nombre}** — {artist}"
             elif tipo == "playlist":
                 sp.start_playback(context_uri=uri, device_id=device_id)
                 return f"📋 Reproduciendo playlist: **{nombre}**"
             elif tipo == "artist":
                 sp.start_playback(context_uri=uri, device_id=device_id)
+                self._remember_artist(nombre)
                 return f"🎤 Reproduciendo: **{nombre}** (Top canciones)"
         else:
             sp.start_playback(device_id=device_id)
@@ -158,8 +174,8 @@ class SpotifyClient:
     def next_track(self) -> str:
         sp = self._ensure_auth()
         sp.next_track()
-        # Esperar un momento para que Spotify actualice
         time.sleep(0.5)
+        self._update_context_from_playback()
         current = self.current_track()
         return f"⏭️ Siguiente canción\n{current}"
 
@@ -167,6 +183,7 @@ class SpotifyClient:
         sp = self._ensure_auth()
         sp.previous_track()
         time.sleep(0.5)
+        self._update_context_from_playback()
         current = self.current_track()
         return f"⏮️ Canción anterior\n{current}"
 
@@ -263,15 +280,67 @@ class SpotifyClient:
 
     # ─── Búsqueda inteligente ─────────────────────────────────
 
+    def _remember_artist(self, artist_str: str):
+        """Guarda artistas recientes para contexto de búsqueda."""
+        if not artist_str:
+            return
+        for a in artist_str.split(","):
+            name = a.strip()
+            if name:
+                normalized = self._normalize(name)
+                self._recent_artists = deque(
+                    [x for x in self._recent_artists if self._normalize(x) != normalized],
+                    maxlen=5,
+                )
+                self._recent_artists.appendleft(name)
+
+    def _update_context_from_playback(self):
+        """Lee lo que está sonando y actualiza el contexto de artistas."""
+        try:
+            sp = self._ensure_auth()
+            data = sp.current_playback()
+            if data and data.get("item"):
+                artists = ", ".join(a["name"] for a in data["item"]["artists"])
+                self._remember_artist(artists)
+        except Exception:
+            pass
+
+    def _load_recent_context(self):
+        """Carga artistas de las últimas canciones para tener contexto al iniciar."""
+        try:
+            sp = self._ensure_auth()
+            recent = sp.current_user_recently_played(limit=5)
+            for item in reversed(recent.get("items", [])):
+                track = item.get("track", {})
+                artists = ", ".join(a["name"] for a in track.get("artists", []))
+                self._remember_artist(artists)
+            if self._recent_artists:
+                logger.debug(f"📝 Contexto Spotify cargado: {list(self._recent_artists)}")
+        except Exception as e:
+            logger.debug(f"No se pudo cargar contexto reciente de Spotify: {e}")
+
+    def _parse_artist_hint(self, query: str) -> tuple[str, str | None]:
+        """
+        Detecta si el query incluye artista explícito.
+        'el malo de aventura' → ('el malo', 'aventura')
+        'mojabi ghost'        → ('mojabi ghost', None)
+        """
+        m = self._DE_ARTIST_RE.match(query)
+        if m:
+            return m.group(1).strip(), m.group(2).strip()
+        return query, None
+
     def _smart_search(self, query: str) -> dict | None:
         """
-        Busca inteligentemente en Spotify.
-        Detecta si el query pide una canción, artista, album o playlist.
+        Busca inteligentemente en Spotify usando contexto de escucha reciente.
+        1. Parsea "canción DE artista" si hay pista explícita
+        2. Si el query es genérico, complementa con artista reciente
+        3. Busca múltiples resultados y elige el mejor con scoring
         """
         sp = self._ensure_auth()
         q_lower = query.lower()
 
-        # Detectar intención
+        # Detectar intención de playlist/album
         if any(kw in q_lower for kw in ["playlist", "lista"]):
             results = sp.search(q=query, limit=1, type="playlist")
             items = results.get("playlists", {}).get("items", [])
@@ -285,11 +354,48 @@ class SpotifyClient:
                 artist = ", ".join(a["name"] for a in items[0]["artists"])
                 return {"type": "album", "uri": items[0]["uri"], "name": items[0]["name"], "artist": artist}
 
-        # Por defecto: buscar canción primero, luego artista
-        results = sp.search(q=query, limit=10, type="track")
-        tracks = results.get("tracks", {}).get("items", [])
-        if tracks:
-            best = self._best_track_match(query, tracks)
+        # ─── Búsqueda de track con contexto ───────────────────
+
+        song_query, artist_hint = self._parse_artist_hint(query)
+        logger.debug(f"🔍 Spotify: song='{song_query}', artist_hint='{artist_hint}', "
+                      f"recent={list(self._recent_artists)}")
+
+        # Estrategia de búsqueda:
+        # 1. Si hay artista explícito ("el malo de aventura") → buscar "el malo artist:aventura"
+        # 2. Si no hay artista pero hay contexto reciente → buscar con y sin artista, combinar
+        # 3. Si no hay nada → búsqueda simple
+
+        all_tracks = []
+
+        if artist_hint:
+            # Búsqueda focalizada: "canción" + artist:artista
+            results = sp.search(q=f"{song_query} artist:{artist_hint}", limit=10, type="track")
+            all_tracks.extend(results.get("tracks", {}).get("items", []))
+            # También buscar sin filtro por si el artist:X no da resultados exactos
+            results = sp.search(q=f"{song_query} {artist_hint}", limit=5, type="track")
+            for t in results.get("tracks", {}).get("items", []):
+                if t["uri"] not in {x["uri"] for x in all_tracks}:
+                    all_tracks.append(t)
+        else:
+            # Búsqueda base
+            results = sp.search(q=query, limit=10, type="track")
+            all_tracks.extend(results.get("tracks", {}).get("items", []))
+
+            # Si hay artistas recientes y el query es corto/genérico,
+            # hacer búsqueda contextual con cada artista reciente
+            if self._recent_artists and len(query.split()) <= 4:
+                seen_uris = {t["uri"] for t in all_tracks}
+                for recent_artist in list(self._recent_artists)[:3]:
+                    results = sp.search(
+                        q=f"{query} artist:{recent_artist}", limit=3, type="track"
+                    )
+                    for t in results.get("tracks", {}).get("items", []):
+                        if t["uri"] not in seen_uris:
+                            all_tracks.append(t)
+                            seen_uris.add(t["uri"])
+
+        if all_tracks:
+            best = self._best_track_match(song_query, all_tracks, artist_hint)
             artist = ", ".join(a["name"] for a in best["artists"])
             return {"type": "track", "uri": best["uri"], "name": best["name"], "artist": artist}
 
@@ -301,35 +407,77 @@ class SpotifyClient:
 
         return None
 
-    @staticmethod
-    def _best_track_match(query: str, tracks: list) -> dict:
+    def _best_track_match(self, query: str, tracks: list,
+                          artist_hint: str | None = None) -> dict:
         """
-        De una lista de tracks de Spotify elige el que más se parece al query.
-        Prioridad: coincidencia exacta del nombre > empieza igual > contiene query > primero.
+        Elige el mejor track con scoring multi-criterio:
+          - Coincidencia de nombre con el query
+          - Coincidencia de artista con el hint explícito
+          - Coincidencia de artista con contexto reciente
+          - Popularidad de Spotify como desempate
         """
-        import unicodedata
-
-        def normalize(s: str) -> str:
-            s = s.lower().strip()
-            s = unicodedata.normalize("NFD", s)
-            s = "".join(c for c in s if unicodedata.category(c) != "Mn")
-            return s
-
-        q = normalize(query)
+        q = self._normalize(query)
+        hint_n = self._normalize(artist_hint) if artist_hint else None
+        recent_n = [self._normalize(a) for a in self._recent_artists]
 
         def score(t):
-            name = normalize(t["name"])
-            if name == q:
-                return 4
-            if name.startswith(q):
-                return 3
-            if q.startswith(name):
-                return 2
-            if q in name:
-                return 1
-            return 0
+            name = self._normalize(t["name"])
+            track_artists = [self._normalize(a["name"]) for a in t["artists"]]
+            popularity = t.get("popularity", 0)  # 0-100
 
-        return max(tracks, key=score)
+            pts = 0.0
+
+            # ── Nombre (max 40 pts) ──
+            if name == q:
+                pts += 40
+            elif name.startswith(q) or q.startswith(name):
+                pts += 30
+            elif q in name or name in q:
+                pts += 20
+
+            # ── Artista explícito "de X" (max 35 pts) ──
+            if hint_n:
+                for ta in track_artists:
+                    if hint_n == ta:
+                        pts += 35
+                        break
+                    elif hint_n in ta or ta in hint_n:
+                        pts += 25
+                        break
+
+            # ── Artista del contexto reciente (max 20 pts, decae) ──
+            if not hint_n and recent_n:
+                for i, ra in enumerate(recent_n):
+                    for ta in track_artists:
+                        if ra == ta:
+                            pts += 20 - (i * 4)  # 20, 16, 12, 8, 4
+                            break
+                        elif ra in ta or ta in ra:
+                            pts += 15 - (i * 3)  # 15, 12, 9, 6, 3
+                            break
+                    else:
+                        continue
+                    break
+
+            # ── Popularidad como desempate (max 5 pts) ──
+            pts += (popularity / 100) * 5
+
+            return pts
+
+        best = max(tracks, key=score)
+        best_score = score(best)
+        best_artists = ", ".join(a["name"] for a in best["artists"])
+        logger.debug(f"🎯 Mejor match: '{best['name']}' — {best_artists} "
+                      f"(score={best_score:.1f})")
+        return best
+
+    @staticmethod
+    def _normalize(s: str) -> str:
+        """Normaliza texto para comparación: minúsculas, sin acentos."""
+        s = s.lower().strip()
+        s = unicodedata.normalize("NFD", s)
+        s = "".join(c for c in s if unicodedata.category(c) != "Mn")
+        return s
 
     # ─── Utilidades ───────────────────────────────────────────
 
