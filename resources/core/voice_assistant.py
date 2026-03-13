@@ -27,6 +27,7 @@ Uso:
 from __future__ import annotations
 
 import logging
+import queue
 import re
 import sys
 import threading
@@ -256,70 +257,99 @@ class VoiceAssistant:
             return None
 
     def _record_until_silence(self, max_seconds: float = 12.0,
-                               silence_sec: float = 1.0,
-                               grace_sec: float = 1.5,
+                               silence_sec: float = 1.5,
+                               grace_sec: float = 2.0,
                                threshold: float | None = None) -> np.ndarray | None:
-        """Graba audio hasta detectar silencio tras habla (VAD simple).
+        """Graba audio con InputStream continuo (no abre/cierra el mic por chunk).
 
         grace_sec: segundos iniciales donde NO se corta por silencio
                    (da tiempo al usuario a empezar a hablar tras el clic).
         También se detiene si _stop_recording se setea (clic del usuario).
         """
-        # Calibrar ruido ambiental del mic (0.5s)
-        try:
-            cal_frames = int(0.5 * self.SAMPLE_RATE)
-            cal = sd.rec(cal_frames, samplerate=self.SAMPLE_RATE,
-                         channels=1, dtype="float32")
-            sd.wait()
-            noise_floor = float(np.sqrt(np.mean(cal.flatten() ** 2)))
-        except Exception:
-            noise_floor = 0.005
-
-        # Umbral = ruido ambiental * 3 (o mínimo configurable)
-        if threshold is None:
-            threshold = max(self.SILENCE_THRESHOLD, noise_floor * 3)
-        logger.debug(f"VAD: noise_floor={noise_floor:.4f}, threshold={threshold:.4f}")
-
         chunk_sec = 0.3
         chunk_frames = int(chunk_sec * self.SAMPLE_RATE)
         max_chunks = int(max_seconds / chunk_sec)
         silence_needed = max(1, int(silence_sec / chunk_sec))
         grace_chunks = int(grace_sec / chunk_sec)
 
+        audio_q: queue.Queue[np.ndarray] = queue.Queue()
+
+        def _callback(indata, frames, time_info, status):
+            audio_q.put(indata.copy())
+
         chunks: list[np.ndarray] = []
         silent_count = 0
         has_speech = False
 
         try:
-            for i in range(max_chunks):
-                if not self._running or self._stop_recording.is_set():
-                    break
-                chunk = sd.rec(chunk_frames, samplerate=self.SAMPLE_RATE,
-                               channels=1, dtype="float32")
-                sd.wait()
-                flat = chunk.flatten()
-                chunks.append(flat)
-
-                rms = float(np.sqrt(np.mean(flat ** 2)))
-                if rms >= threshold:
-                    has_speech = True
-                    silent_count = 0
-                elif has_speech and i >= grace_chunks:
-                    # Solo contar silencio después del grace period
-                    silent_count += 1
-                    if silent_count >= silence_needed:
+            with sd.InputStream(samplerate=self.SAMPLE_RATE, channels=1,
+                                dtype="float32", blocksize=chunk_frames,
+                                callback=_callback):
+                # Calibrar ruido ambiental con los primeros 0.5s
+                cal_chunks = max(1, int(0.5 / chunk_sec))
+                cal_data = []
+                for _ in range(cal_chunks):
+                    try:
+                        data = audio_q.get(timeout=1.0)
+                        cal_data.append(data.flatten())
+                    except queue.Empty:
                         break
+                if cal_data:
+                    cal_audio = np.concatenate(cal_data)
+                    noise_floor = float(np.sqrt(np.mean(cal_audio ** 2)))
+                else:
+                    noise_floor = 0.005
+
+                if threshold is None:
+                    threshold = max(self.SILENCE_THRESHOLD, noise_floor * 3)
+                logger.info(f"VAD: noise={noise_floor:.5f}, umbral={threshold:.5f}")
+
+                # Grabar chunks del stream abierto
+                for i in range(max_chunks):
+                    if not self._running or self._stop_recording.is_set():
+                        break
+                    try:
+                        data = audio_q.get(timeout=1.0)
+                    except queue.Empty:
+                        continue
+                    flat = data.flatten()
+                    chunks.append(flat)
+
+                    rms = float(np.sqrt(np.mean(flat ** 2)))
+                    if rms >= threshold:
+                        has_speech = True
+                        silent_count = 0
+                    elif has_speech and i >= grace_chunks:
+                        silent_count += 1
+                        if silent_count >= silence_needed:
+                            logger.debug("VAD: silencio detectado, cortando")
+                            break
         except Exception as e:
             logger.error(f"Error en grabación VAD: {e}")
             return None
 
         if not chunks:
             return None
-        return np.concatenate(chunks)
+
+        audio = np.concatenate(chunks)
+        peak = float(np.max(np.abs(audio)))
+        logger.info(f"Audio grabado: {len(audio)/self.SAMPLE_RATE:.1f}s, "
+                    f"peak={peak:.4f}, speech={'sí' if has_speech else 'no'}")
+        return audio
 
     def _transcribe(self, audio: np.ndarray) -> str | None:
-        """Transcribe audio usando la función STT provista."""
+        """Transcribe audio usando la función STT provista.
+        Normaliza el audio antes de enviar a Whisper."""
         import tempfile, os
+
+        # Normalizar: amplificar para llenar el rango [-1, 1]
+        peak = float(np.max(np.abs(audio)))
+        if peak > 1e-6:
+            audio = audio / peak * 0.95
+        else:
+            logger.warning("Audio prácticamente vacío (peak ≈ 0)")
+            return None
+
         tmp = tempfile.NamedTemporaryFile(suffix=".wav", delete=False,
                                           dir=str(_ROOT / "data"))
         try:
