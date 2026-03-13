@@ -73,6 +73,14 @@ Responde SIEMPRE con un JSON válido con esta estructura exacta:
     etiqueta es texto OCR extraído de una imagen/foto enviada por el usuario. ÚSALO directamente
     como si fueras leyendo el documento — NO necesitas volver a analizar la imagen.
 13. Para evaluar CVs, usa la herramienta `evaluate_cv` pasando el texto del CV como `cv_text`.
+    El CV se guardará automáticamente en la base de datos.
+14. Tienes acceso a una base de conocimiento persistente con `query_knowledge`, `store_person`,
+    `add_fact` y `store_document`. SIEMPRE consulta la KB con `query_knowledge` cuando el usuario
+    pregunte sobre personas, candidatos, CVs anteriores o comparaciones.
+15. Cuando el usuario mencione datos sobre una persona (habilidades, experiencia, preferencias),
+    usa `store_person` o `add_fact` para registrarlos en la KB para futuras consultas.
+16. Si hay "[CONOCIMIENTO ALMACENADO EN BASE DE DATOS]" en tu contexto, USA esa información
+    para responder — son datos que ya aprendiste en conversaciones o CVs anteriores.
 
 ### CONTEXTO PREVIO (RAG)
 
@@ -128,6 +136,7 @@ class AgentLoop:
         tono_override: str | None = None,
         usuario_agresivo: bool = False,
         conversation_history: list[dict] | None = None,
+        knowledge_context: str | None = None,
     ) -> dict:
         """
         Ejecuta el ciclo agéntico para una meta.
@@ -135,6 +144,7 @@ class AgentLoop:
         Args:
             conversation_history: Mensajes previos del usuario (resúmenes + recientes)
                                   para dar contexto de la conversación.
+            knowledge_context: Conocimiento de la KB relevante (personas, CVs, hechos).
 
         Returns:
             {
@@ -156,6 +166,10 @@ class AgentLoop:
             tools_description=tools_desc,
             rag_context=rag_context,
         )
+
+        # Inyectar conocimiento de la base de datos
+        if knowledge_context:
+            system_prompt += f"\n\n{knowledge_context}"
 
         # Inyectar contexto de usuario
         if user_name:

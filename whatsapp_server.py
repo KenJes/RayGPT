@@ -53,6 +53,7 @@ from core.agent_logger import AgentLogger
 from core.agent_memory import VectorMemory
 from core.approval import approval_manager
 from core.conversation_db import ConversationDB
+from core.knowledge_db import KnowledgeBase
 
 # ====================================
 # CONFIGURACIÓN DE FLASK
@@ -119,7 +120,9 @@ try:
     logger.info(f"   • Modelo Ollama: {config_agente.get('modelos', {}).get('ollama', {}).get('modelo', 'llama3.1:8b')}")
 
     # Inicializar infraestructura agéntica
-    adapter_registry = build_registry(gestor)
+    knowledge_base = KnowledgeBase()  # data/conocimiento.db
+    logger.info("✅ Base de conocimiento inicializada (SQLite)")
+    adapter_registry = build_registry(gestor, knowledge_base=knowledge_base)
 
     def _ai_chat_for_agent(messages, temperature=0.4, max_tokens=2000):
         """Función de chat para el AgentLoop — usa la cadena de fallback."""
@@ -262,6 +265,73 @@ def detectar_cambio_personalidad_natural(texto):
         if frase in t:
             return 'puteado'
     return None
+
+# ====================================
+# EXTRACCIÓN DE CONOCIMIENTO DE CONVERSACIONES
+# ====================================
+
+def _extraer_y_guardar_conocimiento(mensaje: str, respuesta: str, user_id: str):
+    """
+    Analiza el mensaje y la respuesta para extraer datos de personas
+    mencionadas y guardarlos en la base de conocimiento.
+    Usa regex ligero — NO llama al LLM para evitar latencia extra.
+    """
+    try:
+        texto_completo = f"{mensaje}\n{respuesta}"
+
+        # Patrones para detectar datos de personas (nombres propios)
+        # Buscar "se llama X", "X es ...", "X trabaja en ...", etc.
+        patrones_nombre = [
+            r'(?:se llama|mi (?:amigo|amiga|compañero|compañera|colega|jefe|conocido|sobrino|primo|hermano|esposa|esposo|novio|novia) (?:se llama )?)\s*([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)*)',
+            r'(?:hablé con|platiqué con|me dijo|me contó|entrevisté a|el candidato|la candidata|conocí a)\s+([A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)*)',
+        ]
+
+        nombres_encontrados = set()
+        for patron in patrones_nombre:
+            matches = re.findall(patron, texto_completo, re.IGNORECASE)
+            for m in matches:
+                nombre = m.strip()
+                if len(nombre) > 2 and nombre.lower() not in {'con', 'que', 'del', 'los', 'las', 'una', 'uno'}:
+                    nombres_encontrados.add(nombre)
+
+        # Para cada persona detectada, guardar un fact con lo que se dijo
+        for nombre in nombres_encontrados:
+            # Extraer oraciones que mencionan a esta persona
+            oraciones = re.findall(
+                r'[^.!?]*\b' + re.escape(nombre) + r'\b[^.!?]*[.!?]',
+                texto_completo,
+                re.IGNORECASE,
+            )
+            if oraciones:
+                fact = " ".join(o.strip() for o in oraciones[:3])  # Máx 3 oraciones
+                knowledge_base.add_fact(nombre, fact, source="conversacion", user_id=user_id)
+                logger.info(f"📝 Fact guardado sobre {nombre}")
+
+                # Si hay datos estructurales, crear/actualizar persona
+                texto_lower = texto_completo.lower()
+                person_data = {"name": nombre, "added_by": user_id}
+
+                # Detectar skills
+                skills_match = re.findall(
+                    r'(?:sabe|conoce|domina|maneja|experiencia en|trabaja con)\s+([^,.!?]+)',
+                    texto_lower,
+                )
+                if skills_match:
+                    person_data["skills"] = [s.strip() for s in skills_match[:5]]
+
+                # Detectar rol
+                rol_match = re.search(
+                    r'(?:es|trabaja como|trabaja de|su puesto es|su rol es)\s+([^,.!?]{3,40})',
+                    texto_lower,
+                )
+                if rol_match:
+                    person_data["role"] = rol_match.group(1).strip()
+
+                knowledge_base.store_person(**person_data)
+
+    except Exception as e:
+        logger.warning(f"⚠️ Error extrayendo conocimiento: {e}")
+
 
 # ====================================
 # ENDPOINTS
@@ -436,6 +506,18 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
                         f"[CONTENIDO EXTRAÍDO DE LA IMAGEN ADJUNTA]:\n"
                         f"{texto_imagen_extraido}"
                     )
+                    # Guardar documento en la base de conocimiento
+                    try:
+                        doc_id = knowledge_base.store_document(
+                            user_id=user_id,
+                            doc_type="image",
+                            content=texto_imagen_extraido,
+                            title=f"Imagen de {user_name or user_id}",
+                            source="whatsapp",
+                        )
+                        logger.info(f"💾 Imagen guardada en KB (doc_id={doc_id})")
+                    except Exception as ke:
+                        logger.warning(f"⚠️ No se pudo guardar imagen en KB: {ke}")
                 else:
                     logger.warning(f"⚠️ No se pudo extraer texto de la imagen: {texto_imagen_extraido}")
             except Exception as e:
@@ -447,6 +529,8 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
             try:
                 # Obtener contexto de conversación previo para el agente
                 conv_context = get_contexto_completo(user_id)
+                # Buscar conocimiento relevante en la KB
+                kb_context = knowledge_base.build_knowledge_context(query=mensaje_limpio)
                 resultado_agente = agent_loop.run(
                     goal=mensaje_limpio,
                     user_name=user_name,
@@ -454,6 +538,7 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
                     tono_override=get_tono_usuario(user_id),
                     usuario_agresivo=usuario_agresivo,
                     conversation_history=conv_context,
+                    knowledge_context=kb_context,
                 )
                 respuesta = resultado_agente["response"]
                 tiempo_respuesta = time.time() - tiempo_inicio
@@ -461,6 +546,9 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
                 # Guardar en BD persistente
                 agregar_mensaje(user_id, "user", mensaje_limpio)
                 agregar_mensaje(user_id, "assistant", respuesta)
+
+                # Extraer y guardar datos de personas mencionadas
+                _extraer_y_guardar_conocimiento(mensaje_limpio, respuesta, user_id)
 
                 # Rastrear métricas
                 tokens_groq = groq.last_tokens_used if groq and groq.client else 0
@@ -589,6 +677,9 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
             agregar_mensaje(user_id, "user", mensaje_limpio)
             agregar_mensaje(user_id, "assistant", respuesta)
 
+            # Extraer y guardar datos de personas mencionadas
+            _extraer_y_guardar_conocimiento(mensaje_limpio, respuesta, user_id)
+
             # Preparar respuesta JSON limpia
             response_data = {
                 "respuesta": respuesta,
@@ -606,6 +697,8 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
             idioma_override = conversaciones.get('idioma_override', {}).get(user_id)
             # Obtener historial completo (resúmenes + mensajes recientes)
             conv_context = get_contexto_completo(user_id)
+            # Buscar conocimiento relevante en la KB
+            kb_context = knowledge_base.build_knowledge_context(query=mensaje_limpio)
             respuesta = gestor.chat_hibrido(
                 mensaje,
                 idioma_override=idioma_override,
@@ -614,6 +707,7 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
                 tono_override=get_tono_usuario(user_id),
                 usuario_agresivo=usuario_agresivo,
                 history=conv_context,
+                knowledge_context=kb_context,
             )
             
             # Calcular tiempo de respuesta
@@ -655,6 +749,9 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
             # Guardar en BD persistente
             agregar_mensaje(user_id, "user", mensaje_limpio)
             agregar_mensaje(user_id, "assistant", respuesta)
+
+            # Extraer y guardar datos de personas mencionadas
+            _extraer_y_guardar_conocimiento(mensaje_limpio, respuesta, user_id)
 
             return jsonify({
                 "respuesta": respuesta,

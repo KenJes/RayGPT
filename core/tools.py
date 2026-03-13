@@ -320,7 +320,7 @@ Sin markdown extra, sin explicaciones fuera del JSON."""
 
     def chat_hibrido(self, mensaje, idioma_override=None,
                      user_name=None, user_id=None, tono_override=None, usuario_agresivo=False,
-                     history=None):
+                     history=None, knowledge_context=None):
         idioma = idioma_override or self.detector_idioma.detectar(mensaje)
         if idioma == "en":
             prompt_sistema = config_agente.get_prompt_sistema_en()
@@ -359,6 +359,10 @@ Sin markdown extra, sin explicaciones fuera del JSON."""
         vocab_hint = self.memory.get_vocabulario_hint(user_id=user_id)
         if vocab_hint:
             prompt_sistema += vocab_hint
+
+        # Inyectar conocimiento almacenado relevante
+        if knowledge_context:
+            prompt_sistema += f"\n\n{knowledge_context}"
 
         # Construir messages con historial de conversación
         messages = [{"role": "system", "content": prompt_sistema}]
