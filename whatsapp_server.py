@@ -144,7 +144,7 @@ try:
         status = "✅ autenticado" if spotify_client.is_authenticated else "⚠️ pendiente de auth (/spotify/auth)"
         logger.info(f"🎵 Spotify inicializado ({status})")
     else:
-        logger.info("⚠️ Spotify no configurado (falta spotify.client_id/client_secret en config_agente.json)")
+        logger.info("⚠️ Spotify no configurado (agrega SPOTIFY_CLIENT_ID y SPOTIFY_CLIENT_SECRET en el archivo .env)")
 
     adapter_registry = build_registry(gestor, knowledge_base=knowledge_base, spotify_client=spotify_client)
 
@@ -361,70 +361,109 @@ def _extraer_y_guardar_conocimiento(mensaje: str, respuesta: str, user_id: str):
 # SPOTIFY — DETECCIÓN DE COMANDOS RÁPIDOS
 # ====================================
 
+_SPOTIFY_PLAY_RE = re.compile(
+    r"^(?:pon(?:me)?|reproduce|toca|play|"
+    r"quiero\s+(?:escuchar|o[ií]r)|"
+    r"pon(?:me)?\s+(?:la\s+)?(?:canci[oó]n|rola|pista))\s+(.+)",
+    re.IGNORECASE,
+)
+_SPOTIFY_SUFFIX_RE = re.compile(
+    r"\s+en\s+(?:spotify|apple\s+music|youtube\s+music|deezer|tidal)\s*$",
+    re.IGNORECASE,
+)
+
+def _detect_spotify_intent(t: str):
+    """
+    Devuelve (intent, query) si el mensaje es un comando de Spotify, o (None, None).
+    Trabaja sobre texto ya en minúsculas y sin espacios al inicio/fin.
+    """
+    # Pausa
+    if re.search(
+        r"\b(pausa|pause|para\s+la\s+m[uú]sica|det[eé]n\s+la\s+m[uú]sica|"
+        r"stop\s+music|deja\s+de\s+tocar|calla\s+la\s+m[uú]sica)\b",
+        t
+    ):
+        return ("pause", "")
+
+    # Reanudar
+    if re.fullmatch(
+        r"(?:play|dale\s+play|reanuda|contin[uú]a|sigue\s+tocando|resume)",
+        t
+    ):
+        return ("play", "")
+
+    # Siguiente
+    if re.search(r"\b(siguiente(?:\s+canci[oó]n)?|next|skip|salta)\b", t):
+        return ("next", "")
+
+    # Anterior
+    if re.search(r"\b(anterior(?:\s+canci[oó]n)?|previous|atr[aá]s|regresa)\b", t):
+        return ("previous", "")
+
+    # Qué suena
+    if re.search(
+        r"\b(qu[eé]\s+su[eé]na|qu[eé]\s+est[aá]\s+sonando|what.s\s+playing|"
+        r"qu[eé]\s+canci[oó]n\s+(?:es|suena)|qu[eé]\s+estoy\s+escuchando)\b",
+        t
+    ):
+        return ("current", "")
+
+    # Reproducir algo con query
+    m = _SPOTIFY_PLAY_RE.match(t)
+    if m:
+        query = m.group(1).strip()
+        # Quitar sufijo "en spotify", "en apple music", etc.
+        query = _SPOTIFY_SUFFIX_RE.sub("", query).strip()
+        if query:
+            return ("play", query)
+
+    return (None, None)
+
+
 def _handle_spotify_command(mensaje: str) -> str | None:
     """
     Detecta comandos de Spotify en lenguaje natural.
     Devuelve la respuesta directa o None si no es un comando de Spotify.
+    Si el comando es reconocido pero Spotify no está autenticado, avisa al usuario.
     """
-    if not spotify_client or not spotify_client.is_authenticated:
-        return None
-
     t = mensaje.lower().strip()
+    intent, query = _detect_spotify_intent(t)
 
-    # Patrones de pausa
-    if t in ("pausa", "pause", "para la música", "para la musica", "detén la música",
-             "deten la musica", "stop music", "deja de tocar"):
-        try:
+    if intent is None:
+        return None  # No es un comando de Spotify — continuar flujo normal
+
+    # Es un comando de Spotify reconocido ─ verificar autenticación
+    if not spotify_client:
+        return (
+            "⚠️ Spotify no está configurado. Agrega tus credenciales en el archivo .env "
+            "(SPOTIFY_CLIENT_ID y SPOTIFY_CLIENT_SECRET)."
+        )
+
+    if not spotify_client.is_authenticated:
+        auth_url = spotify_client.get_auth_url()
+        return (
+            "🎵 Para que pueda controlar Spotify necesito que me autorices primero.\n"
+            "Abre este enlace en tu navegador:\n"
+            f"👉 {auth_url}\n\n"
+            "Una vez que autorices, vuelve a enviar el comando y lo ejecuto."
+        )
+
+    # Ejecutar el comando
+    try:
+        if intent == "pause":
             return spotify_client.pause()
-        except Exception as e:
-            return f"❌ Error pausando: {e}"
-
-    # Patrones de reanudar
-    if t in ("play", "dale play", "reanuda", "continua", "sigue tocando", "resume"):
-        try:
+        elif intent == "play" and query:
+            return spotify_client.play(query)
+        elif intent == "play":
             return spotify_client.play()
-        except Exception as e:
-            return f"❌ Error reanudando: {e}"
-
-    # Siguiente canción
-    if t in ("siguiente", "next", "skip", "salta", "siguiente canción", "siguiente cancion",
-             "cambia de canción", "cambia de cancion"):
-        try:
+        elif intent == "next":
             return spotify_client.next_track()
-        except Exception as e:
-            return f"❌ Error: {e}"
-
-    # Anterior
-    if t in ("anterior", "previous", "atrás", "atras", "regresa", "canción anterior", "cancion anterior"):
-        try:
+        elif intent == "previous":
             return spotify_client.previous_track()
-        except Exception as e:
-            return f"❌ Error: {e}"
-
-    # Qué suena
-    if t in ("qué suena", "que suena", "qué está sonando", "que esta sonando", "what's playing",
-             "qué canción es", "que cancion es", "qué estoy escuchando", "que estoy escuchando"):
-        try:
+        elif intent == "current":
             return spotify_client.current_track()
-        except Exception as e:
-            return f"❌ Error: {e}"
-
-    # Reproducir algo — "pon X", "reproduce X", "play X", "ponme X"
-    play_patterns = [
-        "pon ", "ponme ", "reproduce ", "toca ", "play ",
-        "quiero escuchar ", "quiero oir ", "quiero oír ",
-        "pon la canción ", "pon la cancion ",
-        "ponme la canción ", "ponme la cancion ",
-        "pon la rola ", "ponme la rola ",
-    ]
-    for pattern in play_patterns:
-        if t.startswith(pattern):
-            query = mensaje[len(pattern):].strip()
-            if query:
-                try:
-                    return spotify_client.play(query)
-                except Exception as e:
-                    return f"❌ Error reproduciendo: {e}"
+    except Exception as e:
+        return f"❌ Error Spotify: {e}"
 
     return None
 
