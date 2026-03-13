@@ -129,6 +129,8 @@ class VoiceAssistant:
         self._running = False
         self._thread: threading.Thread | None = None
         self._muted = False
+        self._trigger_event = threading.Event()
+        self._stop_recording = threading.Event()
 
     # ─── Control ──────────────────────────────────────────────
 
@@ -141,18 +143,30 @@ class VoiceAssistant:
                          "Instala con: pip install sounddevice soundfile")
             return
         self._running = True
+        self._trigger_event.clear()
+        self._stop_recording.clear()
         self._thread = threading.Thread(target=self._loop, daemon=True, name="VoiceAssistant")
         self._thread.start()
-        wake = 'Raymundo' if self.persona == 'raymundo' else 'Reina'
-        logger.info(f"🎤 Asistente iniciado como {wake} — di '{wake}' para activar")
+        logger.info("🎤 Asistente iniciado — haz clic en el orbe para hablar")
 
     def stop(self):
         """Detiene el asistente."""
         self._running = False
+        self._trigger_event.set()      # desbloquear si está esperando
+        self._stop_recording.set()     # desbloquear grabación
         if self._thread:
             self._thread.join(timeout=5)
             self._thread = None
         logger.info("🔇 Asistente de voz detenido")
+
+    def trigger(self):
+        """Llamado al hacer clic en el orbe. Alterna escucha/parar."""
+        if self._trigger_event.is_set():
+            # Ya estaba escuchando → forzar parada de grabación
+            self._stop_recording.set()
+        else:
+            # Idle → empezar a escuchar
+            self._trigger_event.set()
 
     def mute(self):
         self._muted = True
@@ -167,9 +181,8 @@ class VoiceAssistant:
     # ─── Loop principal ───────────────────────────────────────
 
     def _loop(self):
-        """Ciclo principal: escucha → detecta → procesa → responde."""
-        wake = 'Raymundo' if self.persona == 'raymundo' else 'Reina'
-        logger.info(f"👂 Esperando wake word '{wake}'...")
+        """Ciclo click-to-talk: espera clic → graba → procesa → responde."""
+        logger.info("👂 Esperando clic en el orbe...")
         self.on_idle()
 
         while self._running:
@@ -178,46 +191,32 @@ class VoiceAssistant:
                     time.sleep(0.5)
                     continue
 
-                # 1. Escucha corta para detectar wake word
-                audio = self._record(self.WAKE_LISTEN_SEC)
-                if audio is None:
-                    continue
+                # 1. Esperar clic del usuario (o wake word en 2do plano)
+                self._trigger_event.wait()
+                if not self._running:
+                    break
+                self._trigger_event.clear()
+                self._stop_recording.clear()
 
-                # Verificar que hay sonido real (no silencio)
-                rms = np.sqrt(np.mean(audio ** 2))
-                if rms < self.SILENCE_THRESHOLD:
-                    continue
-
-                # 2. Transcribir para buscar wake word
-                text = self._transcribe(audio)
-                if not text:
-                    continue
-
-                detected, command = _split_after_wake(text, self.persona)
-                if not detected:
-                    continue
-
-                # ¡Wake word detectada!
-                logger.info(f"🔔 Wake word detectada! Comando inline: '{command}'")
-                self.on_wake()
-                time.sleep(0.5)  # Dejar que la animación de activación se vea
-
-                # 3. Si el comando vino junto con la wake word, usarlo
-                #    Si no, escuchar hasta que deje de hablar (VAD)
-                if not command or len(command) < 3:
-                    logger.info("👂 Escuchando comando (VAD)...")
-                    self.on_listen()
-                    cmd_audio = self._record_until_silence()
-                    if cmd_audio is not None:
-                        command = self._transcribe(cmd_audio) or ""
+                # 2. Escuchar (animación LISTENING)
+                logger.info("👂 Escuchando...")
+                self.on_listen()
+                cmd_audio = self._record_until_silence()
+                command = ""
+                if cmd_audio is not None:
+                    command = self._transcribe(cmd_audio) or ""
 
                 if not command or len(command) < 2:
-                    # No dijo nada después de la wake word
-                    self._speak("¿Sí? ¿Qué necesitas?")
+                    self._speak("¿Sí? No te escuché. Inténtalo de nuevo.")
                     self.on_idle()
                     continue
 
-                # 4. Procesar el comando
+                logger.info(f"Transcrito: '{command}'")
+
+                # Detectar cambio de voz antes de procesar
+                # (se maneja dentro de process_fn)
+
+                # 3. Procesar el comando
                 logger.info(f"🧠 Procesando: '{command}'")
                 self.on_think()
 
@@ -227,7 +226,7 @@ class VoiceAssistant:
                     logger.error(f"❌ Error procesando: {e}")
                     response = f"Hubo un error: {e}"
 
-                # 5. Responder con voz
+                # 4. Responder con voz
                 logger.info(f"🗣️ Respuesta: '{response[:80]}...'")
                 self.on_speak()
                 self._speak(response)
@@ -237,6 +236,7 @@ class VoiceAssistant:
                 break
             except Exception as e:
                 logger.error(f"❌ Error en voice loop: {e}")
+                self.on_idle()
                 time.sleep(1)
 
         logger.info("🛑 Voice loop terminado")
@@ -260,9 +260,7 @@ class VoiceAssistant:
                                threshold: float | None = None) -> np.ndarray | None:
         """Graba audio hasta detectar silencio tras habla (VAD simple).
 
-        Graba en bloques de 0.3 s y monitorea el RMS de cada bloque.
-        Cuando el usuario deja de hablar por *silence_sec* segundos
-        consecutivos, deja de grabar — igual que Alexa / Siri.
+        También se detiene si _stop_recording se setea (clic del usuario).
         """
         if threshold is None:
             threshold = self.SILENCE_THRESHOLD
@@ -278,7 +276,7 @@ class VoiceAssistant:
 
         try:
             for _ in range(max_chunks):
-                if not self._running:
+                if not self._running or self._stop_recording.is_set():
                     break
                 chunk = sd.rec(chunk_frames, samplerate=self.SAMPLE_RATE,
                                channels=1, dtype="float32")
@@ -534,7 +532,8 @@ def _run_standalone():
         gui.set_state(VoiceGUI.WAKE, "¡Activado!")
 
     def on_listen():
-        gui.set_state(VoiceGUI.LISTENING, "Escuchando\u2026")
+        gui.set_state(VoiceGUI.LISTENING, "Escuchando\u2026",
+                      "Toca el orbe para enviar")
 
     def on_think():
         gui.set_state(VoiceGUI.THINKING, "Pensando\u2026")
@@ -543,8 +542,8 @@ def _run_standalone():
         gui.set_state(VoiceGUI.SPEAKING, "Respondiendo\u2026")
 
     def on_idle():
-        wake = 'Raymundo' if assistant.persona == 'raymundo' else 'Reina'
-        gui.set_state(VoiceGUI.IDLE, "Esperando\u2026", f'Di "{wake}" para activar')
+        gui.set_state(VoiceGUI.IDLE, "Esperando\u2026",
+                      "Toca el orbe para hablar")
 
     # ── Crear y arrancar ──────────────────────────────────────
     assistant = VoiceAssistant(
@@ -559,7 +558,8 @@ def _run_standalone():
         on_speak=on_speak,
         persona='raymundo',
     )
-
+    # Conectar clic del orbe al asistente
+    gui._on_orb_click = assistant.trigger
     assistant.start()
     try:
         gui.run()  # bloquea en el hilo principal (tk mainloop)

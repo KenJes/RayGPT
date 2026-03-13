@@ -52,9 +52,11 @@ class VoiceGUI:
     _FPS = 30
 
     def __init__(self, persona: str = "raymundo",
-                 on_close: Callable[[], None] | None = None):
+                 on_close: Callable[[], None] | None = None,
+                 on_orb_click: Callable[[], None] | None = None):
         self._persona = persona
         self._on_close = on_close
+        self._on_orb_click = on_orb_click
         self._state = self.IDLE
         self._frame = 0
         self._alive = True
@@ -107,8 +109,10 @@ class VoiceGUI:
         self._cvs = tk.Canvas(
             self._root, width=sz, height=sz,
             bg=bg, highlightthickness=0,
+            cursor="hand2",
         )
         self._cvs.pack()
+        self._cvs.bind("<Button-1>", self._on_canvas_click)
         self._cx = sz // 2
         self._cy = sz // 2
 
@@ -120,9 +124,8 @@ class VoiceGUI:
         self._lbl_status.pack(pady=(25, 4))
 
         # Hint
-        wake = "Raymundo" if self._persona == "raymundo" else "Reina"
         self._lbl_hint = tk.Label(
-            self._root, text=f'Di "{wake}" para activar',
+            self._root, text="Toca el orbe para hablar",
             font=self._ft_hint, fg=_P["subtext"], bg=bg,
         )
         self._lbl_hint.pack(pady=(0, 0))
@@ -172,10 +175,9 @@ class VoiceGUI:
         name  = "RAYMUNDO" if persona == "raymundo" else "R.E.I.N.A."
         voice = "Voz: Jorge \u00b7 Masculina" if persona == "raymundo" \
                 else "Voz: Dalia \u00b7 Femenina"
-        wake  = "Raymundo" if persona == "raymundo" else "Reina"
         self._lbl_title.config(text=name)
         self._lbl_voice.config(text=voice)
-        self._lbl_hint.config(text=f'Di "{wake}" para activar')
+        self._lbl_hint.config(text="Toca el orbe para hablar")
         self._root.title(f"{name} \u00b7 Asistente de Voz")
 
     def _handle_close(self):
@@ -186,6 +188,11 @@ class VoiceGUI:
             self._root.destroy()
         except tk.TclError:
             pass
+
+    def _on_canvas_click(self, _event=None):
+        """El usuario hizo clic en el orbe."""
+        if self._on_orb_click:
+            self._on_orb_click()
 
     def _apply_dark_titlebar(self):
         """Fuerza barra de título oscura en Windows 10/11."""
