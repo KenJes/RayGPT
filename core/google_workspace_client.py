@@ -46,6 +46,8 @@ class GoogleWorkspaceClient:
         'https://www.googleapis.com/auth/drive.file',
         'https://www.googleapis.com/auth/spreadsheets',
         'https://www.googleapis.com/auth/presentations',
+        'https://www.googleapis.com/auth/calendar',
+        'https://www.googleapis.com/auth/youtube.readonly',
     ]
     
     def __init__(self, service_account_file):
@@ -61,6 +63,7 @@ class GoogleWorkspaceClient:
         self.sheets_service = None
         self.calendar_service = None
         self.slides_service = None
+        self.youtube_service = None
         self.auth_type = None
         self.pexels_api_key = os.environ.get('PEXELS_API_KEY')
         
@@ -119,8 +122,9 @@ class GoogleWorkspaceClient:
             self.sheets_service = build('sheets', 'v4', credentials=self.credentials)
             self.slides_service = build('slides', 'v1', credentials=self.credentials)
             self.calendar_service = build('calendar', 'v3', credentials=self.credentials)
+            self.youtube_service = build('youtube', 'v3', credentials=self.credentials)
             
-            print("✅ Google Workspace conectado correctamente")
+            print("✅ Google Workspace y YouTube conectados correctamente")
             
         except Exception as e:
             print(f"❌ Error al inicializar servicios de Google: {e}")
@@ -359,23 +363,25 @@ class GoogleWorkspaceClient:
     # GOOGLE CALENDAR
     # ═══════════════════════════════════════════════════════════════
     
-    def crear_evento(self, titulo, fecha_inicio, fecha_fin, descripcion="", ubicacion=""):
+    def crear_evento(self, titulo, fecha_inicio, fecha_fin, descripcion="", ubicacion="", recordatorio_minutos=30):
         """
-        Crea un evento en el calendario
-        
+        Crea un evento en el calendario con alarma/recordatorio
+
         Args:
             titulo: Título del evento
             fecha_inicio: datetime del inicio
             fecha_fin: datetime del fin
             descripcion: Descripción (opcional)
             ubicacion: Ubicación (opcional)
-        
+            recordatorio_minutos: Minutos antes del evento para la alarma (default 30)
+
         Returns:
             dict: Información del evento creado
         """
-        if not self.is_available():
+        if not self.is_available() or not self.calendar_service:
+            print("⚠️ Google Calendar no está disponible o no ha sido inicializado.")
             return None
-        
+
         try:
             event = {
                 'summary': titulo,
@@ -389,21 +395,37 @@ class GoogleWorkspaceClient:
                     'dateTime': fecha_fin.isoformat(),
                     'timeZone': 'America/Mexico_City',
                 },
+                'reminders': {
+                    'useDefault': False,
+                    'overrides': [
+                        {'method': 'popup',  'minutes': recordatorio_minutos},
+                        {'method': 'email',  'minutes': recordatorio_minutos},
+                    ],
+                },
             }
+            
+            print(f"📅 Llamando API de Calendar para insertar evento: {titulo}")
+            print(f"   Inicio: {fecha_inicio.isoformat()}")
+            print(f"   Fin: {fecha_fin.isoformat()}")
             
             event_result = self.calendar_service.events().insert(
                 calendarId='primary',
                 body=event
             ).execute()
             
+            event_id = event_result.get('id')
+            print(f"✅ Evento guardado exitosamente en Google Calendar")
+            print(f"   ID del evento: {event_id}")
+            print(f"   URL: {event_result.get('htmlLink')}")
+            
             return {
-                'id': event_result.get('id'),
+                'id': event_id,
                 'url': event_result.get('htmlLink'),
                 'titulo': titulo
             }
             
-        except HttpError as e:
-            print(f"❌ Error al crear evento: {e}")
+        except Exception as e:
+            print(f"❌ Error al crear evento en Google Calendar: {type(e).__name__}: {e}")
             return None
     
     def listar_eventos_proximos(self, max_results=10):
@@ -1449,3 +1471,49 @@ class GoogleWorkspaceClient:
             print(f"⚠️ Error inesperado con Pexels para '{query}': {e}")
         return f"https://via.placeholder.com/800x600/4285F4/FFFFFF?text={query.replace(' ', '+')}"
 
+    # ═══════════════════════════════════════════════════════════════
+    # YOUTUBE
+    # ═══════════════════════════════════════════════════════════════
+
+    def buscar_video_youtube(self, query, max_results=3):
+        """
+        Busca videos en YouTube
+        
+        Args:
+            query: Término de búsqueda
+            max_results: Número máximo de resultados (default 3)
+            
+        Returns:
+            list: Lista de diccionarios con la información del video
+        """
+        if not self.is_available() or not self.youtube_service:
+            print("⚠️ YouTube no está disponible o no tiene credenciales.")
+            return []
+            
+        try:
+            request = self.youtube_service.search().list(
+                part="snippet",
+                q=query,
+                type="video",
+                maxResults=max_results,
+                relevanceLanguage="es",
+                regionCode="MX"
+            )
+            response = request.execute()
+            
+            videos = []
+            for item in response.get("items", []):
+                video_id = item["id"]["videoId"]
+                videos.append({
+                    "id": video_id,
+                    "titulo": item["snippet"]["title"],
+                    "canal": item["snippet"]["channelTitle"],
+                    "descripcion": item["snippet"]["description"],
+                    "url": f"https://www.youtube.com/watch?v={video_id}"
+                })
+            
+            return videos
+            
+        except HttpError as e:
+            print(f"❌ Error al buscar en YouTube: {e}")
+            return []

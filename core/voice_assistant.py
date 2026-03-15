@@ -544,7 +544,16 @@ def _run_standalone():
                 except Exception as e:
                     return f"Error Spotify: {e}"
 
-        # 2. Meta compleja → AgentLoop
+        # 2. Herramientas: calendario, YouTube, presentaciones, docs, web, etc.
+        resultado_herramienta = gestor.procesar_mensaje(
+            command, user_name="Kenneth", user_id=user_id,
+        )
+        if resultado_herramienta.get("ejecuto_herramienta"):
+            response = resultado_herramienta["resultado"]
+            agregar_mensaje(user_id, "assistant", response)
+            return response
+
+        # 3. Meta compleja → AgentLoop
         if es_meta_compleja(command):
             try:
                 kb_context = knowledge_base.build_knowledge_context(query=command)
@@ -558,7 +567,7 @@ def _run_standalone():
             except Exception as e:
                 response = f"Error del agente: {e}"
         else:
-            # 3. Chat híbrido
+            # 4. Chat híbrido (fallback)
             try:
                 kb_context = knowledge_base.build_knowledge_context(query=command)
                 conv_context = get_contexto_completo(user_id)

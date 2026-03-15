@@ -207,7 +207,7 @@ class KnowledgeBase:
                 ).fetchall()
         return [dict(r) for r in rows]
 
-    def search_documents(self, query: str, limit: int = 20) -> list[dict]:
+    def search_documents(self, query: str, limit: int = 20, user_id: str | None = None) -> list[dict]:
         """Búsqueda de texto en documentos. Busca por cada palabra del query."""
         words = self._extract_search_words(query)
         if not words:
@@ -221,6 +221,9 @@ class KnowledgeBase:
             )
             params.extend([p, p, p, p])
         where = " OR ".join(conditions)
+        if user_id:
+            where = f"user_id = ? AND ({where})"
+            params.insert(0, user_id)
         params.append(limit)
         with self._conn() as conn:
             rows = conn.execute(
@@ -322,7 +325,7 @@ class KnowledgeBase:
             results.append(d)
         return results
 
-    def search_people(self, query: str, limit: int = 20) -> list[dict]:
+    def search_people(self, query: str, limit: int = 20, user_id: str | None = None) -> list[dict]:
         """Busca personas por cada palabra del query (nombre, skills, rol, etc.)."""
         words = self._extract_search_words(query)
         if not words:
@@ -337,6 +340,9 @@ class KnowledgeBase:
             )
             params.extend([p, p, p, p, p, p])
         where = " OR ".join(conditions)
+        if user_id:
+            where = f"added_by = ? AND ({where})"
+            params.insert(0, user_id)
         params.append(limit)
         with self._conn() as conn:
             rows = conn.execute(
@@ -384,7 +390,7 @@ class KnowledgeBase:
             ).fetchall()
         return [dict(r) for r in rows]
 
-    def search_facts(self, query: str, limit: int = 30) -> list[dict]:
+    def search_facts(self, query: str, limit: int = 30, user_id: str | None = None) -> list[dict]:
         words = self._extract_search_words(query)
         if not words:
             return []
@@ -395,6 +401,9 @@ class KnowledgeBase:
             conditions.append("(fact LIKE ? OR person_name LIKE ?)")
             params.extend([p, p])
         where = " OR ".join(conditions)
+        if user_id:
+            where = f"user_id = ? AND ({where})"
+            params.insert(0, user_id)
         params.append(limit)
         with self._conn() as conn:
             rows = conn.execute(
@@ -407,25 +416,30 @@ class KnowledgeBase:
     # Contexto para LLM — construye resumen de conocimiento
     # ═══════════════════════════════════════════════════════════
 
-    def build_knowledge_context(self, query: str | None = None, person_name: str | None = None) -> str:
+    def build_knowledge_context(self, query: str | None = None, person_name: str | None = None, user_id: str | None = None) -> str:
         """
         Construye un bloque de texto con conocimiento relevante para inyectar al LLM.
         Se usa como contexto adicional en el system prompt.
+        Cuando se proporciona user_id, solo devuelve conocimiento de ese usuario.
         """
         parts = []
 
         # Si se pregunta por una persona específica
         if person_name:
             person = self.get_person(person_name)
-            if person:
+            if person and (not user_id or person.get("added_by") == user_id):
                 parts.append(self._format_person(person))
                 # Agregar hechos
                 facts = self.get_facts(person_name)
+                if user_id:
+                    facts = [f for f in facts if f.get("user_id") == user_id]
                 if facts:
                     facts_text = "\n".join(f"  - {f['fact']}" for f in facts[:15])
                     parts.append(f"Datos adicionales sobre {person_name}:\n{facts_text}")
                 # Agregar documentos/CVs
                 docs = self.get_documents_by_person(person_name)
+                if user_id:
+                    docs = [d for d in docs if d.get("user_id") == user_id]
                 for doc in docs[:3]:
                     if doc["doc_type"] == "cv" and doc.get("evaluation"):
                         parts.append(f"Evaluación de CV de {person_name}:\n{doc['evaluation'][:1500]}")
@@ -433,12 +447,12 @@ class KnowledgeBase:
         # Búsqueda general
         if query:
             # Buscar personas relevantes
-            people = self.search_people(query, limit=5)
+            people = self.search_people(query, limit=5, user_id=user_id)
             for p in people:
                 if not person_name or p["name"].lower() != person_name.lower():
                     parts.append(self._format_person(p))
             # Buscar hechos relevantes
-            facts = self.search_facts(query, limit=10)
+            facts = self.search_facts(query, limit=10, user_id=user_id)
             if facts:
                 seen = set()
                 fact_lines = []
@@ -450,7 +464,7 @@ class KnowledgeBase:
                 if fact_lines:
                     parts.append("Datos relevantes:\n" + "\n".join(fact_lines))
             # Buscar documentos relevantes
-            docs = self.search_documents(query, limit=5)
+            docs = self.search_documents(query, limit=5, user_id=user_id)
             for doc in docs:
                 if doc["doc_type"] == "cv":
                     snippet = doc["content"][:500]

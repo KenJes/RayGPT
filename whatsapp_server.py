@@ -658,8 +658,8 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
             try:
                 # Obtener contexto de conversación previo para el agente
                 conv_context = get_contexto_completo(user_id)
-                # Buscar conocimiento relevante en la KB
-                kb_context = knowledge_base.build_knowledge_context(query=mensaje_limpio)
+                # Buscar conocimiento relevante en la KB (filtrado por usuario)
+                kb_context = knowledge_base.build_knowledge_context(query=mensaje_limpio, user_id=user_id)
                 resultado_agente = agent_loop.run(
                     goal=mensaje_limpio,
                     user_name=user_name,
@@ -826,8 +826,8 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
             idioma_override = conversaciones.get('idioma_override', {}).get(user_id)
             # Obtener historial completo (resúmenes + mensajes recientes)
             conv_context = get_contexto_completo(user_id)
-            # Buscar conocimiento relevante en la KB
-            kb_context = knowledge_base.build_knowledge_context(query=mensaje_limpio)
+            # Buscar conocimiento relevante en la KB (filtrado por usuario)
+            kb_context = knowledge_base.build_knowledge_context(query=mensaje_limpio, user_id=user_id)
             respuesta = gestor.chat_hibrido(
                 mensaje,
                 idioma_override=idioma_override,
@@ -1260,6 +1260,19 @@ def internal_error(error):
 # ====================================
 
 if __name__ == '__main__':
+    # ⚠️ SYNC: Copiar token.json a data/ (necesario para Google APIs)
+    import shutil
+    from pathlib import Path
+    token_resources = Path("resources/data/token.json")
+    token_local = Path("data/token.json")
+    if token_resources.exists() and (not token_local.exists() or token_resources.stat().st_mtime > token_local.stat().st_mtime):
+        try:
+            token_local.parent.mkdir(exist_ok=True)
+            shutil.copy2(token_resources, token_local)
+            logger.info("✅ Token.json sincronizado desde resources/data/ a data/")
+        except Exception as e:
+            logger.warning(f"⚠️ No se pudo sincronizar token.json: {e}")
+    
     print("\n" + "="*70)
     print("  🚀 rAImundoGPT WhatsApp Server")
     print("="*70)

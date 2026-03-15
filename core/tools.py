@@ -5,6 +5,7 @@ Detecta intenciones, crea documentos/presentaciones, busca en web, etc.
 
 import json
 import re
+import unicodedata
 from pathlib import Path
 
 from core.config import config_agente
@@ -85,7 +86,7 @@ class GestorHerramientas:
         # 2. Detectar intención
         resultado_intencion = self.detector.detectar(mensaje_procesado)
 
-        if resultado_intencion["confianza"] >= 0.3:
+        if resultado_intencion["confianza"] >= 0.15:
             intencion = resultado_intencion["intencion"]
 
             if intencion == "presentacion" and self.google:
@@ -155,6 +156,22 @@ class GestorHerramientas:
                         "tipo": "web_scraping",
                         "resultado": res_web,
                     }
+
+            if intencion == "calendario" and self.google:
+                res = self.gestionar_calendario(mensaje_procesado)
+                return {
+                    "ejecuto_herramienta": True,
+                    "tipo": "calendario",
+                    "resultado": res,
+                }
+
+            if intencion == "youtube" and self.google:
+                res = self.gestionar_youtube(mensaje_procesado)
+                return {
+                    "ejecuto_herramienta": True,
+                    "tipo": "youtube",
+                    "resultado": res,
+                }
 
         return {"ejecuto_herramienta": False}
 
@@ -314,6 +331,239 @@ Sin markdown extra, sin explicaciones fuera del JSON."""
             return {"texto": "❌ Error al crear hoja de cálculo", "archivo": None}
         except Exception as e:
             return {"texto": f"❌ Error: {e}", "archivo": None}
+
+    def gestionar_calendario(self, mensaje):
+        if not self.google:
+            return "❌ No tienes Google Calendar configurado."
+
+        import datetime
+        ahora = datetime.datetime.now()
+
+        def quitar_acentos(t):
+            return "".join(
+                c for c in unicodedata.normalize("NFKD", t)
+                if not unicodedata.combining(c)
+            )
+
+        msg_plano = quitar_acentos(mensaje.lower())
+
+        # ── Detectar CREAR vs VER por palabras clave ──────────────────
+        palabras_crear = [
+            "agenda", "agendar", "agendame", "agendame",
+            "crea", "crear", "cita", "reunion", "reunión", "junta",
+            "recordatorio", "recordar", "recuerda", "recuerdame", "recuerdame",
+            "apunta", "apuntame", "apuntame", "anota", "anotame",
+            "agrega", "agregar", "añade", "anadir", "guarda", "guardame",
+            "programa ", "programar", "pon ", "poneme", "ponme",
+            "avísame", "avisame", "alerta", "alarma", "notifica",
+            "no me olvides", "no olvidar", "no se me olvide",
+            "tengo que ir", "tengo que hacer", "iremos", "saldremos",
+            "voy a ir", "voy a", "compromiso", "zoom ", "meet ",
+            "llamada", "videoconferencia", "actividad",
+        ]
+
+        palabras_ver = [
+            "qué tengo", "que tengo", "cuáles son", "cuales son",
+            "muestrame", "muestrame", "dime mis", "mis eventos",
+            "mi agenda", "mis citas", "agenda del dia", "agenda del dia",
+            "hay algo", "tengo algo", "algún evento", "alguna cita",
+            "próximos", "proximos", "ver mi calendario", "ver mi agenda",
+            "qué hay para", "que hay para",
+        ]
+
+        kw_crear_plain = [quitar_acentos(p) for p in palabras_crear]
+        kw_ver_plain   = [quitar_acentos(p) for p in palabras_ver]
+
+        es_crear = any(p in msg_plano for p in kw_crear_plain)
+        es_ver   = any(p in msg_plano for p in kw_ver_plain)
+
+        if es_crear and not es_ver:
+            accion = "crear"
+        elif es_ver and not es_crear:
+            accion = "ver"
+        else:
+            prompt_accion = (
+                "UNA SOLA PALABRA (crear/ver): ¿El usuario quiere CREAR o VER eventos?\n"
+                "MENSAJE: " + mensaje
+            )
+            accion = self._consultar_ia(prompt_accion, temperature=0.1, max_tokens=5).strip().lower()
+            if "ver" not in accion:
+                accion = "crear"
+
+        print(f"📅 Acción detectada: {accion}")
+
+        # ── Compute date context for LLM ─────────────────────────────
+        nombres_dias = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+        nombres_meses = ["enero", "febrero", "marzo", "abril", "mayo", "junio",
+                         "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"]
+        manana       = ahora + datetime.timedelta(days=1)
+        pasado       = ahora + datetime.timedelta(days=2)
+        dias_lunes   = (7 - ahora.weekday()) % 7 or 7
+        prox_lunes   = ahora + datetime.timedelta(days=dias_lunes)
+
+        contexto_fechas = (
+            f"Hoy es {nombres_dias[ahora.weekday()]} {ahora.strftime('%Y-%m-%d')} "
+            f"({nombres_meses[ahora.month - 1]} {ahora.year}).\n"
+            f"Mañana = {manana.strftime('%Y-%m-%d')} ({nombres_dias[manana.weekday()]})\n"
+            f"Pasado mañana = {pasado.strftime('%Y-%m-%d')} ({nombres_dias[pasado.weekday()]})\n"
+            f"Próximo lunes = {prox_lunes.strftime('%Y-%m-%d')}\n"
+        )
+
+        if "crear" in accion:
+            prompt_crear = (
+                f"EXTRAE DATOS DE CALENDARIO EN ESPAÑOL.\n"
+                f"{contexto_fechas}"
+                f"Si no dice hora, usa 12:00:00. Si no dice duración, asume 1 hora para el fin.\n"
+                f"Para el recordatorio: usa 30 min salvo que el usuario pida algo distinto.\n"
+                f"MENSAJE DEL USUARIO: '{mensaje}'\n\n"
+                "RESPONDE SOLO CON ESTE JSON EXACTO (sin explicaciones ni markdown):\n"
+                "{\n"
+                "  \"titulo\": \"Nombre descriptivo del evento en español\",\n"
+                "  \"fecha_inicio\": \"YYYY-MM-DDTHH:MM:SS\",\n"
+                "  \"fecha_fin\": \"YYYY-MM-DDTHH:MM:SS\",\n"
+                "  \"descripcion\": \"Descripción detallada (qué hacer, qué llevar, detalles relevantes)\",\n"
+                "  \"ubicacion\": \"Lugar si se menciona, sino vacío\",\n"
+                "  \"recordatorio_minutos\": 30\n"
+                "}"
+            )
+            print(f"📅 Procesando creación: {mensaje}")
+
+            respuesta_ia = self._consultar_ia(prompt_crear, temperature=0.1)
+            json_match = re.search(r"\{[\s\S]*\}", respuesta_ia)
+            if json_match:
+                respuesta_ia = json_match.group(0)
+
+            try:
+                datos = json.loads(respuesta_ia)
+                f_inicio = datetime.datetime.fromisoformat(datos["fecha_inicio"])
+                f_fin    = datetime.datetime.fromisoformat(datos["fecha_fin"])
+
+                # Asegurarse que fin > inicio (mínimo 30 minutos)
+                if f_fin <= f_inicio:
+                    f_fin = f_inicio + datetime.timedelta(hours=1)
+
+                recordatorio_min = int(datos.get("recordatorio_minutos", 30))
+
+                print(f"📅 Creando: '{datos.get('titulo')}' | {f_inicio} → {f_fin} | ⏰ {recordatorio_min}min")
+
+                evento = self.google.crear_evento(
+                    titulo=datos.get("titulo", "Nuevo Evento"),
+                    fecha_inicio=f_inicio,
+                    fecha_fin=f_fin,
+                    descripcion=datos.get("descripcion", ""),
+                    ubicacion=datos.get("ubicacion", ""),
+                    recordatorio_minutos=recordatorio_min,
+                )
+                if evento:
+                    print(f"✅ Evento guardado: {evento['id']}")
+                    dia_semana   = nombres_dias[f_inicio.weekday()]
+                    mes_nombre   = nombres_meses[f_inicio.month - 1]
+                    hora_legible = f_inicio.strftime("%H:%M")
+                    hora_fin     = f_fin.strftime("%H:%M")
+
+                    resp = (
+                        f"✅ **¡Listo! Evento agendado.**\n\n"
+                        f"📌 **{datos.get('titulo')}**\n"
+                        f"📅 {dia_semana} {f_inicio.day} de {mes_nombre} de {f_inicio.year}\n"
+                        f"🕐 {hora_legible} – {hora_fin} hrs\n"
+                    )
+                    if datos.get("ubicacion"):
+                        resp += f"📍 {datos['ubicacion']}\n"
+                    if datos.get("descripcion"):
+                        resp += f"📝 {datos['descripcion']}\n"
+                    resp += f"⏰ Alarma {recordatorio_min} minutos antes\n"
+                    resp += f"🔗 Ver en Google Calendar: {evento['url']}"
+                    return resp
+
+                return "❌ Error creando el evento en Google Calendar."
+
+            except Exception as e:
+                print(f"❌ Error en calendario: {e}")
+                return f"❌ Hubo un error procesando el evento: {e}"
+
+        else:
+            # ── VER EVENTOS ───────────────────────────────────────────
+            try:
+                eventos = self.google.listar_eventos_proximos(max_results=8)
+                if not eventos:
+                    return "🗓️ No tienes eventos próximos en tu agenda."
+
+                resultado = "🗓️ **Tu agenda próxima:**\n\n"
+                for ev in eventos:
+                    dt_raw = ev["start"].get("dateTime", ev["start"].get("date", ""))
+                    resumen = ev.get("summary", "(sin título)")
+                    lugar   = ev.get("location", "")
+                    try:
+                        dt = datetime.datetime.fromisoformat(dt_raw.replace("Z", "+00:00"))
+                        dt_mx = dt.astimezone(datetime.timezone(datetime.timedelta(hours=-6)))
+                        fecha_fmt = dt_mx.strftime(
+                            f"%A %d de {nombres_meses[dt_mx.month - 1]} a las %H:%M"
+                        )
+                    except Exception:
+                        fecha_fmt = dt_raw
+                    resultado += f"• **{resumen}** — {fecha_fmt}"
+                    if lugar:
+                        resultado += f" 📍 {lugar}"
+                    resultado += "\n"
+                return resultado
+            except Exception as e:
+                return f"❌ Error leyendo el calendario: {e}"
+
+    # IDs de videos de broma conocidos que jamás deben recomendarse
+    _YOUTUBE_BLACKLIST_IDS = {
+        "dQw4w9WgXcQ",  # Rick Astley - Never Gonna Give You Up (rickroll)
+        "oHg5SJYRHA0",  # RickRoll alternativo
+        "eBGIQ7ZuuiU",  # Charlie Bit My Finger
+    }
+
+    def gestionar_youtube(self, mensaje):
+        if not self.google or not hasattr(self.google, 'youtube_service'):
+            return "❌ No tienes la API de YouTube configurada."
+
+        prompt = (
+            "Extrae EXACTAMENTE lo que el usuario quiere buscar en YouTube. "
+            "Devuelve SOLO el término de búsqueda, sin explicaciones, sin comillas, sin prefijos. "
+            "El resultado debe ser en español y reflejar literalmente la intención del usuario. "
+            "No inventes ni cambies lo que pide. "
+            "Ejemplos: 'ponme algo de rock' → 'rock en español', "
+            "'quiero escuchar a Bad Bunny' → 'Bad Bunny', "
+            "'videos de cocina mexicana' → 'cocina mexicana recetas'. "
+            "Mensaje del usuario: " + mensaje
+        )
+
+        consulta = self._consultar_ia(prompt, temperature=0.0, max_tokens=60).strip()
+        # Sanear: quitar comillas y saltos que el modelo pueda añadir
+        consulta = consulta.strip('"\'').split("\n")[0].strip()
+        if not consulta:
+            consulta = mensaje  # fallback: usar el mensaje original
+        print(f"🔎 YouTube búsqueda extraída: {consulta}")
+
+        videos = self.google.buscar_video_youtube(consulta, max_results=8)
+
+        # Filtrar videos de la lista negra
+        videos = [v for v in videos if v.get("id") not in self._YOUTUBE_BLACKLIST_IDS]
+
+        # Tomar los primeros 3 tras el filtro
+        videos = videos[:3]
+
+        if not videos:
+            return "📺 Busqué en YouTube, pero no encontré nada relevante."
+
+        respuesta = f"📺 *Aquí tienes para '{consulta}':*\n\n"
+        titulos_videos = []
+        for i, v in enumerate(videos, 1):
+            respuesta += f"{i}. *{v['titulo']}* — {v['canal']}\n🔗 {v['url']}\n\n"
+            titulos_videos.append(v['titulo'])
+
+        # Comentario final acorde a la personalidad del agente
+        videos_str = " | ".join(titulos_videos)
+        prompt_final = (
+            f"ESCRIBE EN ESPAÑOL. Haz un comentario corto (máximo 2 oraciones) sobre estos videos de YouTube: {videos_str}. "
+            "Sé natural y amigable, OBLIGATORIAMENTE en español."
+        )
+        comentario_final = self._consultar_ia(prompt_final, temperature=0.7, max_tokens=100)
+        print(f"💬 Comentario YouTube: {comentario_final}")
+        return respuesta + comentario_final
 
     # ───── Web ─────────────────────────────────────────────────
 

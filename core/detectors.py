@@ -54,6 +54,46 @@ class DetectorIntenciones:
         "sitio web", "website",
     ]
 
+    KEYWORDS_CALENDARIO = [
+        # Acciones directas de crear
+        "agenda", "agendar", "agendame", "agéndame",
+        "cita", "citas", "reunion", "reunión", "junta", "juntas",
+        "evento", "eventos", "recordatorio", "recordatorios",
+        "recordar", "recuerda", "recuérdame", "recuerdame",
+        "programa", "programar", "calendariza",
+        "apunta", "apúntame", "apuntame", "anota", "anótame", "anotame",
+        "agrega", "agregar", "añade", "añadir", "crea un", "crear un",
+        "pon ", "poneme", "pónme", "guarda", "guárdame", "guardame",
+        "avísame", "avisame", "alerta", "alarma", "notifícame", "notificame",
+        "no me olvides", "no se me olvide", "no olvidar",
+        "tengo que ir", "tengo que hacer", "tengo que",
+        "voy a ir", "voy a", "iremos", "saldremos", "estaremos",
+        "compromiso", "meet ", "zoom ", "llamada", "videoconferencia",
+        "actividad", "tarea para",
+        # Ver la agenda
+        "mi agenda", "mis eventos", "mis citas",
+        "qué tengo", "que tengo", "cuándo tengo", "cuando tengo",
+        "próximos eventos", "proximos eventos",
+        "qué hay", "que hay", "hay algo",
+        "tengo agendado", "tengo algo",
+        "mi calendario", "ver calendario", "agenda del día", "agenda del dia",
+        "qué eventos tengo", "que eventos tengo",
+        # Referencias temporales que implican agenda
+        "mañana a las", "hoy a las", "esta tarde a las", "esta noche a las",
+        "pasado mañana", "la semana que viene", "la próxima semana",
+        "el lunes", "el martes", "el miércoles", "el jueves",
+        "el viernes", "el sábado", "el domingo",
+        "agrega a mi agenda", "agrega al calendario", "agregar al calendario",
+        "pon en mi agenda", "pon en el calendario", "ponme en el calendario",
+        "agrega un recordatorio", "pon un recordatorio", "crea un recordatorio",
+        "crea un evento", "crear un evento", "añade al calendario",
+    ]
+
+    KEYWORDS_YOUTUBE = [
+        "youtube", "video", "recomienda un video", "busca en youtube",
+        "videos de", "video de", "quiero ver un video",
+    ]
+
     @staticmethod
     def _strip_accents(text):
         nfkd = unicodedata.normalize("NFKD", text)
@@ -68,12 +108,14 @@ class DetectorIntenciones:
             "imagenes": self._contar_keywords(mensaje_lower, self.KEYWORDS_IMAGENES),
             "analisis_documento": self._contar_keywords(mensaje_lower, self.KEYWORDS_DOCUMENTOS_ANALISIS),
             "web_scraping": self._contar_keywords(mensaje_lower, self.KEYWORDS_WEB_SCRAPING),
+            "calendario": self._contar_keywords(mensaje_lower, self.KEYWORDS_CALENDARIO),
+            "youtube": self._contar_keywords(mensaje_lower, self.KEYWORDS_YOUTUBE),
         }
 
         intencion_principal = max(scores, key=scores.get)
         confianza = scores[intencion_principal] / 10.0
 
-        if confianza < 0.3:
+        if confianza < 0.15:
             return {"intencion": "chat", "confianza": 1.0, "tema": mensaje, "detalles": {}}
 
         tema = self._extraer_tema(mensaje, intencion_principal)

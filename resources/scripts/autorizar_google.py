@@ -14,6 +14,8 @@ SCOPES = [
     'https://www.googleapis.com/auth/spreadsheets',
     'https://www.googleapis.com/auth/drive.file',
     'https://www.googleapis.com/auth/drive',
+    'https://www.googleapis.com/auth/calendar',
+    'https://www.googleapis.com/auth/youtube.readonly',
 ]
 
 def main():
@@ -82,6 +84,8 @@ def main():
         print(f"📁 Token guardado en: {os.path.abspath(token_file)}")
         print()
         print("✅ Raymundo ya puede crear presentaciones, documentos y hojas de cálculo")
+        print("✅ Raymundo ya puede crear y leer eventos de Google Calendar")
+        print("✅ Raymundo ya puede buscar videos en YouTube")
         print("✅ No necesitas volver a autorizar (el token se renueva automáticamente)")
         print()
         print("🚀 Ahora puedes usar: /raymundo crea una presentación sobre Python")
