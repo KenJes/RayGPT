@@ -37,6 +37,32 @@ CONFIG_DIR = BASE_DIR / "config"
 DATA_DIR = BASE_DIR / "data"
 OUTPUT_DIR = BASE_DIR / "output"
 
+
+def limpiar_formato_markdown(texto: str) -> str:
+    """Elimina formato markdown de las respuestas para que suenen naturales en WhatsApp."""
+    if not texto:
+        return texto
+    # Quitar negritas **texto** o __texto__
+    texto = re.sub(r'\*\*(.+?)\*\*', r'\1', texto)
+    texto = re.sub(r'__(.+?)__', r'\1', texto)
+    # Quitar cursivas *texto* o _texto_ (solo si no es un emoticon como *-*)
+    texto = re.sub(r'(?<!\*)\*([^*\n]+?)\*(?!\*)', r'\1', texto)
+    # Quitar encabezados ### texto → texto
+    texto = re.sub(r'^#{1,6}\s*', '', texto, flags=re.MULTILINE)
+    # Quitar viñetas de lista "- item" al inicio de línea → "item"
+    texto = re.sub(r'^[\-\•]\s+', '', texto, flags=re.MULTILINE)
+    # Quitar bloques de código ```
+    texto = re.sub(r'```[\s\S]*?```', lambda m: m.group(0).replace('```', ''), texto)
+    # Quitar backticks inline `texto`
+    texto = re.sub(r'`([^`]+?)`', r'\1', texto)
+    # Quitar disclaimers comunes que el modelo mete
+    texto = re.sub(
+        r'\n*\*?(?:Nota|Aclaración|Disclaimer|Advertencia|Importante|Recuerda)\*?:\s*'
+        r'(?:Esto es solo|Este es solo|Esto no es|Recuerda que|Si necesitas|Ten en cuenta).*$',
+        '', texto, flags=re.IGNORECASE | re.MULTILINE
+    )
+    return texto.strip()
+
 # Crear directorios si no existen
 for directory in (CONFIG_DIR, DATA_DIR, OUTPUT_DIR):
     directory.mkdir(parents=True, exist_ok=True)
@@ -669,7 +695,7 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
                     conversation_history=conv_context,
                     knowledge_context=kb_context,
                 )
-                respuesta = resultado_agente["response"]
+                respuesta = limpiar_formato_markdown(resultado_agente["response"])
                 tiempo_respuesta = time.time() - tiempo_inicio
 
                 # Guardar en BD persistente
@@ -719,7 +745,7 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
         )
         
         if resultado_herramienta['ejecuto_herramienta']:
-            respuesta = resultado_herramienta['resultado']
+            respuesta = limpiar_formato_markdown(resultado_herramienta['resultado'])
             archivo_info = resultado_herramienta.get('archivo')
             
             # Si hay un archivo adjunto, exportarlo
@@ -828,7 +854,7 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
             conv_context = get_contexto_completo(user_id)
             # Buscar conocimiento relevante en la KB (filtrado por usuario)
             kb_context = knowledge_base.build_knowledge_context(query=mensaje_limpio, user_id=user_id)
-            respuesta = gestor.chat_hibrido(
+            respuesta = limpiar_formato_markdown(gestor.chat_hibrido(
                 mensaje,
                 idioma_override=idioma_override,
                 user_name=user_name,
@@ -837,7 +863,7 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
                 usuario_agresivo=usuario_agresivo,
                 history=conv_context,
                 knowledge_context=kb_context,
-            )
+            ))
             
             # Calcular tiempo de respuesta
             tiempo_respuesta = time.time() - tiempo_inicio

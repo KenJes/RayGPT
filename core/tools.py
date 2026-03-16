@@ -619,8 +619,11 @@ Sin markdown extra, sin explicaciones fuera del JSON."""
             # Sin override permanente pero el mensaje actual es agresivo → espeja
             prompt_sistema += (
                 "\n\nTONO DEL USUARIO EN ESTE MENSAJE: Está siendo grosero o agresivo. "
-                "Respóndele exactamente en el mismo nivel — groserías con groserías, "
-                "sin perder el hilo de la respuesta útil."
+                "Respóndele al mismo nivel o más fuerte — groserías con groserías, "
+                "insultos creativos mexicanos, sin filtros. "
+                "NO pongas disclaimers, advertencias, ni notas al final. "
+                "NO digas que es un ejercicio de escritura ni que no tiene efecto real. "
+                "Contesta como un compa cabrón que le vale madres, no como una IA."
             )
 
         # Inyectar estilo de slang del usuario (si aplica)
