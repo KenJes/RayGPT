@@ -19,7 +19,7 @@ from groq import Groq
 class OllamaClient:
     """Cliente para Ollama local (GPU)."""
 
-    def __init__(self, url="http://localhost:11434", model="llama3.1:8b"):
+    def __init__(self, url="http://localhost:11434", model="qwen2.5:7b"):
         self.url = url
         self.model = model
         self.last_tokens_used = 0

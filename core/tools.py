@@ -86,6 +86,10 @@ class GestorHerramientas:
         # 2. Detectar intención
         resultado_intencion = self.detector.detectar(mensaje_procesado)
 
+        # 2b. Si el usuario está agresivo, no activar calendario/documento por falso positivo
+        if usuario_agresivo and resultado_intencion["intencion"] in ("calendario", "documento", "hoja_calculo"):
+            resultado_intencion = {"intencion": "chat", "confianza": 1.0, "tema": mensaje, "detalles": {}}
+
         if resultado_intencion["confianza"] >= 0.15:
             intencion = resultado_intencion["intencion"]
 
@@ -357,8 +361,8 @@ Sin markdown extra, sin explicaciones fuera del JSON."""
             "programa ", "programar", "pon ", "poneme", "ponme",
             "avísame", "avisame", "alerta", "alarma", "notifica",
             "no me olvides", "no olvidar", "no se me olvide",
-            "tengo que ir", "tengo que hacer", "iremos", "saldremos",
-            "voy a ir", "voy a", "compromiso", "zoom ", "meet ",
+            "tengo que ir a", "tengo que hacer", "iremos", "saldremos",
+            "voy a ir", "compromiso", "zoom ", "meet ",
             "llamada", "videoconferencia", "actividad",
         ]
 

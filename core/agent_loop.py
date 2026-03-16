@@ -512,7 +512,7 @@ _SIMPLE_PATTERNS = [
 ]
 
 
-def es_meta_compleja(mensaje: str) -> bool:
+def es_meta_compleja(mensaje: str, usuario_agresivo: bool = False) -> bool:
     """
     Determina si un mensaje requiere el ciclo agéntico completo
     o si es un chat simple que puede resolverse directamente.
@@ -522,6 +522,16 @@ def es_meta_compleja(mensaje: str) -> bool:
     # Mensajes muy cortos → chat simple
     if len(msg) < 15:
         return False
+
+    # Mensajes puramente agresivos sin petición real → chat simple
+    if usuario_agresivo:
+        # Solo enviar al AgentLoop si hay una petición agéntica explícita
+        tiene_patron_agentico = any(
+            re.search(pattern, msg, re.IGNORECASE)
+            for pattern in _AGENTIC_PATTERNS
+        )
+        if not tiene_patron_agentico:
+            return False
 
     # Comandos rápidos → no agéntico
     if msg.startswith("/"):

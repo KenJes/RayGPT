@@ -653,7 +653,7 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
                 logger.error(f"❌ Error extrayendo texto de imagen: {e}")
 
         # ─── RUTA AGÉNTICA: metas complejas van al AgentLoop ──────
-        if es_meta_compleja(mensaje_limpio):
+        if es_meta_compleja(mensaje_limpio, usuario_agresivo=usuario_agresivo):
             logger.info(f"🧠 [{user_name or user_id}] Meta compleja detectada → AgentLoop")
             try:
                 # Obtener contexto de conversación previo para el agente
