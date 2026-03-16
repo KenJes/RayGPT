@@ -14,7 +14,15 @@ CONFIG_DIR = BASE_DIR / "config"
 DATA_DIR = BASE_DIR / "data"
 OUTPUT_DIR = BASE_DIR / "output"
 RESOURCES_DIR = BASE_DIR / "resources"
-PERSONALITY_FILE = DATA_DIR / "personalidad_raymundo.md"
+
+# Selección de personalidad via variable de entorno PERSONALITY_MODE
+# "raymundo" (default) = agente profesional de Axoloit
+# "rai"                = compa agresivo, déspota y chistoso
+_PERSONALITY_MODE = os.environ.get("PERSONALITY_MODE", "raymundo").lower()
+if _PERSONALITY_MODE == "rai":
+    PERSONALITY_FILE = DATA_DIR / "personalidad_rai.md"
+else:
+    PERSONALITY_FILE = DATA_DIR / "personalidad_raymundo.md"
 
 # Crear directorios si no existen
 for _d in (CONFIG_DIR, DATA_DIR, OUTPUT_DIR):
@@ -33,7 +41,7 @@ else:
 # ═══════════════════════════════════════════════════════════════
 
 def _load_personality_file() -> str | None:
-    """Lee data/personalidad_raymundo.md si existe."""
+    """Lee el archivo de personalidad según PERSONALITY_MODE (raymundo o rai)."""
     if PERSONALITY_FILE.exists():
         try:
             return PERSONALITY_FILE.read_text(encoding="utf-8").strip()

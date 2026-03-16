@@ -124,6 +124,10 @@ try:
     with open('config_agente.json', 'r', encoding='utf-8') as f:
         config_agente = json.load(f)
     logger.info("✅ Configuración cargada")
+
+    # Detectar modo de personalidad
+    _personality_mode = os.environ.get("PERSONALITY_MODE", "raymundo").lower()
+    logger.info(f"🎭 Personalidad activa: {'rAI (compa culero)' if _personality_mode == 'rai' else 'Raymundo (agente pro)'}")
     
     # Inicializar clientes AI
     ollama = OllamaClient()
