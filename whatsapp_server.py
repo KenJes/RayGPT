@@ -42,6 +42,8 @@ def limpiar_formato_markdown(texto: str) -> str:
     """Elimina formato markdown de las respuestas para que suenen naturales en WhatsApp."""
     if not texto:
         return texto
+    # Quitar prefijo "Raymundo:" o "rAI:" que el modelo a veces agrega
+    texto = re.sub(r'^(?:Raymundo|rAI)\s*:\s*', '', texto)
     # Quitar negritas **texto** o __texto__
     texto = re.sub(r'\*\*(.+?)\*\*', r'\1', texto)
     texto = re.sub(r'__(.+?)__', r'\1', texto)
@@ -60,6 +62,11 @@ def limpiar_formato_markdown(texto: str) -> str:
         r'\n*\*?(?:Nota|Aclaración|Disclaimer|Advertencia|Importante|Recuerda)\*?:\s*'
         r'(?:Esto es solo|Este es solo|Esto no es|Recuerda que|Si necesitas|Ten en cuenta).*$',
         '', texto, flags=re.IGNORECASE | re.MULTILINE
+    )
+    # Quitar secciones de disculpa/disclaimer sutiles
+    texto = re.sub(
+        r'\n*(?:—|---)\s*\n.*(?:no comparto|cambiar de tema|algo más|ayudarte).*$',
+        '', texto, flags=re.IGNORECASE | re.DOTALL
     )
     return texto.strip()
 

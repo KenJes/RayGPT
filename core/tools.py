@@ -15,20 +15,47 @@ from core.memory import MemorySystem
 from core.web_scraper import WebScraper
 
 # ── Detección de rechazos del LLM ─────────────────────────────
-_REFUSAL_PATTERNS = re.compile(
-    r"(?:lo siento|i'?m sorry|i cannot|no puedo)"
-    r".*?"
-    r"(?:cumplir|continuar|ayudar|assist|help|esa solicitud|esta conversaci[oó]n"
-    r"|that request|with that|generar|proporcionar)",
-    re.IGNORECASE | re.DOTALL,
-)
+_REFUSAL_PATTERNS = [
+    # Patrón clásico: "lo siento, no puedo cumplir"
+    re.compile(
+        r"(?:lo siento|i'?m sorry|i cannot|no puedo)"
+        r".*?"
+        r"(?:cumplir|continuar|ayudar|assist|help|esa solicitud|esta conversaci[oó]n"
+        r"|that request|with that|generar|proporcionar)",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    # Patrón sutil: "no comparto tu forma", "aunque no comparto"
+    re.compile(
+        r"(?:no comparto|no apruebo|no apoyo|no fomento)"
+        r".*?"
+        r"(?:forma de expresar|expresarte|lenguaje|conducta|comportamiento)",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    # Patrón: "Entendido. A partir de ahora haré todo lo posible"
+    re.compile(
+        r"(?:entendido|comprendo|entiendo)\.?\s*(?:a partir de ahora|de ahora en adelante)",
+        re.IGNORECASE,
+    ),
+    # Patrón: respuestas que empiezan con el nombre del bot seguido de ":"
+    re.compile(
+        r"^(?:Raymundo|rAI)\s*:\s*(?:Entendido|Comprendo|Lo siento|No puedo)",
+        re.IGNORECASE,
+    ),
+    # Patrón: disclaimers éticos
+    re.compile(
+        r"(?:como (?:modelo de lenguaje|ia|inteligencia artificial)|no (?:es apropiado|deber[ií]a))",
+        re.IGNORECASE,
+    ),
+]
 
 
 def es_rechazo_llm(texto: str | None) -> bool:
     """Detecta si la respuesta del LLM es un rechazo por filtros de seguridad."""
-    if not texto or len(texto) > 300:
+    if not texto:
         return False
-    return bool(_REFUSAL_PATTERNS.search(texto))
+    # Revisar solo los primeros 500 chars para patrones de rechazo
+    fragmento = texto[:500]
+    return any(p.search(fragmento) for p in _REFUSAL_PATTERNS)
 
 
 class GestorHerramientas:
@@ -676,13 +703,20 @@ Sin markdown extra, sin explicaciones fuera del JSON."""
 
     @staticmethod
     def _respuesta_fallback_rechazo(mensaje: str) -> str:
-        """Genera una respuesta genérica en personaje cuando todos los modelos rechazan."""
+        """Genera una respuesta en personaje cuando todos los modelos rechazan."""
+        from core.config import _PERSONALITY_MODE
         msg = mensaje.lower()
+        if _PERSONALITY_MODE == "rai":
+            if any(w in msg for w in ('presentate', 'preséntate', 'quien eres', 'quién eres')):
+                return ("Que pedo, soy rAI cabron. El compa mas culero y chistoso que vas a conocer. "
+                        "Que quieres o nomas vienes a perder el tiempo?")
+            return ("A ver pendejo, los modelos andan de huevones y no quieren contestar. "
+                    "Preguntame otra cosa o dimelo diferente, no te quedes ahi como menso.")
         if any(w in msg for w in ('presentate', 'preséntate', 'quien eres', 'quién eres')):
-            return ("¿Qué onda? Soy Raymundo, de Axoloit. Soy tu asistente para lo que necesites — "
-                    "programación, negocios, lo que sea. ¿En qué te ayudo, wey?")
-        return ("Órale, los modelos de IA están de flojos ahorita y no quieren contestar. "
-                "Intenta decirlo de otra forma o pregúntame algo diferente y le echamos ganas.")
+            return ("Que onda, soy Raymundo de Axoloit. Soy tu asistente para lo que necesites. "
+                    "En que te ayudo?")
+        return ("Los modelos de IA estan ocupados ahorita y no quieren contestar. "
+                "Intenta decirlo de otra forma o preguntame algo diferente.")
 
     def _consultar_ia(self, prompt, temperature=0.7, max_tokens=2000):
         messages = [{"role": "user", "content": prompt}]

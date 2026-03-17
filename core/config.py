@@ -58,6 +58,8 @@ class ConfigAgente(dict):
         self.config = self
 
     def get_nombre_agente(self):
+        if _PERSONALITY_MODE == "rai":
+            return "rAI"
         return self.config.get("personalidad", {}).get("nombre", "Raymundo")
 
     def get_prompt_sistema(self):
