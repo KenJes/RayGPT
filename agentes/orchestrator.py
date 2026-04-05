@@ -16,7 +16,7 @@ from typing import Optional
 
 from base_agent import (
     log,
-    get_groq_client, get_github_client, get_ollama_client,
+    get_groq_client, get_mistral_client, get_ollama_client,
     llamar_ia,
 )
 
@@ -35,9 +35,9 @@ http_app = FastAPI(
 )
 
 # ── Clientes IA ────────────────────────────────────────────────
-groq   = get_groq_client()
-github = get_github_client()
-ollama = get_ollama_client()
+groq    = get_groq_client()
+mistral = get_mistral_client()
+ollama  = get_ollama_client()
 
 # URLs de los agentes (cuando corren localmente fuera de Docker)
 AGENT_URLS = {

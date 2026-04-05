@@ -36,8 +36,8 @@ class EmojiProcessor:
 class VisionProcessor:
     """OCR local con Tesseract + fallback a APIs de Vision si están disponibles."""
 
-    def __init__(self, github_client=None, groq_client=None):
-        self.github_client = github_client
+    def __init__(self, mistral_client=None, groq_client=None):
+        self.mistral_client = mistral_client
         self.groq_client = groq_client
         self.supported_formats = [".png", ".jpg", ".jpeg", ".gif", ".webp"]
 
@@ -174,9 +174,9 @@ class VisionProcessor:
             }
         ]
 
-        # Intento 1: GitHub Models (GPT-4o Vision)
-        if self.github_client and self.github_client.client:
-            result = self.github_client.chat_with_images(messages, max_tokens=2000)
+        # Intento 1: Mistral Pixtral (Vision)
+        if self.mistral_client and self.mistral_client.client:
+            result = self.mistral_client.chat_with_images(messages, max_tokens=2000)
             if result and not str(result).startswith("❌"):
                 return result
 

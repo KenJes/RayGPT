@@ -19,7 +19,7 @@ import uvicorn
 
 from base_agent import (
     log,
-    get_groq_client, get_github_client, get_ollama_client,
+    get_groq_client, get_mistral_client, get_ollama_client,
     OUTPUT_DIR, llamar_ia,
 )
 from datetime import datetime
@@ -57,9 +57,9 @@ class PitchInput(BaseModel):
     duracion_minutos: int = 2
 
 # ── Clientes IA ────────────────────────────────────────────────
-groq   = get_groq_client()
-github = get_github_client()
-ollama = get_ollama_client()
+groq    = get_groq_client()
+mistral = get_mistral_client()
+ollama  = get_ollama_client()
 
 # ── Context empresarial Axoloit ────────────────────────────────
 AXOLOIT_CONTEXT = """
@@ -104,8 +104,8 @@ _SYSTEM_PROPUESTAS = (
 
 
 def _llamar_ia(prompt: str, max_tokens: int = 3000) -> str:
-    """Cadena Groq → GitHub → Ollama."""
-    return llamar_ia(prompt, groq, github, ollama, system=_SYSTEM_PROPUESTAS, max_tokens=max_tokens)
+    """Cadena Groq → Mistral → Ollama."""
+    return llamar_ia(prompt, groq, mistral, ollama, system=_SYSTEM_PROPUESTAS, max_tokens=max_tokens)
 
 
 # ════════════════════════════════════════════════════════════════

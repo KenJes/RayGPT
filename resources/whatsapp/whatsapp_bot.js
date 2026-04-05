@@ -195,7 +195,8 @@ client.on('message_create', async message => {
   }
 
   // FILTRO PRINCIPAL: Solo procesar si comienza con comandos específicos
-  const comandosPermitidos = ['/raymundo', '/rai', '/amigable', '/puteado', '/ray', '/putedo', '/friendly'];
+  const comandosPermitidos = ['/raymundo', '/rai', '/amigable', '/puteado', '/ray', '/putedo', '/friendly',
+                              '/reset', '/borrar', '/limpiar', '/nuevo', '/clear'];
   const tieneComando = comandosPermitidos.some(cmd => texto.toLowerCase().startsWith(cmd));
 
   if (!tieneComando) {

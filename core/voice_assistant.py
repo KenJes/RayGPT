@@ -414,7 +414,7 @@ def _run_standalone():
 
     # ── Inicializar cerebro ───────────────────────────────────
     from core.config import config_agente, AppConfig
-    from core.ai_clients import OllamaClient, GitHubModelsClient, GroqClient
+    from core.ai_clients import OllamaClient, MistralClient, GroqClient
     from core.tools import GestorHerramientas
     from core.audio_handler import get_audio_handler
     from core.adapters import build_registry
@@ -427,9 +427,9 @@ def _run_standalone():
 
     cfg = AppConfig()
     ollama = OllamaClient(cfg.ollama_url, cfg.ollama_model)
-    github = GitHubModelsClient(cfg.github_token)
+    mistral = MistralClient(cfg.mistral_api_key)
     groq = GroqClient()
-    gestor = GestorHerramientas(ollama, github, google=cfg.google_client, groq=groq)
+    gestor = GestorHerramientas(ollama, mistral, google=cfg.google_client, groq=groq)
     knowledge_base = KnowledgeBase()
 
     # Spotify
@@ -462,9 +462,9 @@ def _run_standalone():
             r = groq.chat(messages, temperature=temperature, max_tokens=max_tokens)
             if r and not es_rechazo_llm(r):
                 return r
-        # 3. GitHub Models GPT-4o
-        if github and github.client:
-            r = github.chat(messages, temperature=temperature, max_tokens=max_tokens)
+        # 3. Mistral
+        if mistral and mistral.client:
+            r = mistral.chat(messages, temperature=temperature, max_tokens=max_tokens)
             if r and not es_rechazo_llm(r):
                 return r
         return ""
@@ -550,7 +550,25 @@ def _run_standalone():
         )
         if resultado_herramienta.get("ejecuto_herramienta"):
             response = resultado_herramienta["resultado"]
-            agregar_mensaje(user_id, "assistant", response)
+            # /reset: limpiar SQLite BD + vocabulario/temas + VectorMemory
+            if resultado_herramienta.get("tipo") == "reset":
+                from core.conversation_db import clear_user
+                clear_user(user_id)
+                try:
+                    gestor.memory.clear_user_context(user_id)
+                except Exception:
+                    pass
+                try:
+                    agent_memory.clear()
+                except Exception:
+                    pass
+                from core.config import _get_mode
+                if _get_mode() == "rai":
+                    response = "ya wey, borre toda la conversacion. ahora si, q chingados kieres?"
+                else:
+                    response = "🗑️ Listo, borré el historial. Empezamos de cero."
+            else:
+                agregar_mensaje(user_id, "assistant", response)
             return response
 
         # 3. Meta compleja → AgentLoop

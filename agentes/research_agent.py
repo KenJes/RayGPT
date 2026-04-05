@@ -17,7 +17,7 @@ from pydantic import BaseModel
 import uvicorn
 
 from base_agent import (
-    log, get_groq_client, get_github_client, get_ollama_client,
+    log, get_groq_client, get_mistral_client, get_ollama_client,
     BASE_DIR, WebScraper, llamar_ia,
 )
 
@@ -41,9 +41,9 @@ class ResumirInput(BaseModel):
     enfoque: str = "general"
 
 # ── Clientes IA ────────────────────────────────────────────────
-groq   = get_groq_client()
-github = get_github_client()
-ollama = get_ollama_client()
+groq    = get_groq_client()
+mistral = get_mistral_client()
+ollama  = get_ollama_client()
 
 # ── WebScraper reutilizado de core/ ────────────────────────────
 scraper = WebScraper()
@@ -52,8 +52,8 @@ _SYSTEM_RESEARCH = "Eres un investigador experto en tecnología y negocios."
 
 
 def _llamar_ia(prompt: str, max_tokens: int = 2000) -> str:
-    """Cadena Groq → GitHub → Ollama."""
-    return llamar_ia(prompt, groq, github, ollama, system=_SYSTEM_RESEARCH, max_tokens=max_tokens)
+    """Cadena Groq → Mistral → Ollama."""
+    return llamar_ia(prompt, groq, mistral, ollama, system=_SYSTEM_RESEARCH, max_tokens=max_tokens)
 
 
 # ════════════════════════════════════════════════════════════════

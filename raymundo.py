@@ -14,7 +14,7 @@ from pathlib import Path
 
 # ── Core imports ───────────────────────────────────────────────
 from core.config import config_agente, AppConfig
-from core.ai_clients import OllamaClient, GitHubModelsClient, GroqClient
+from core.ai_clients import OllamaClient, MistralClient, GroqClient
 from core.tools import GestorHerramientas
 from core.audio_handler import get_audio_handler
 from core.adapters import build_registry
@@ -54,11 +54,11 @@ class ChatGUI:
         # Inicializar componentes
         cfg = AppConfig()
         self.ollama = OllamaClient(cfg.ollama_url, cfg.ollama_model)
-        self.github = GitHubModelsClient(cfg.github_token)
+        self.mistral = MistralClient(cfg.mistral_api_key)
         self.groq_client = GroqClient()
         self.google = cfg.google_client
         self.herramientas = GestorHerramientas(
-            self.ollama, self.github, google=self.google, groq=self.groq_client
+            self.ollama, self.mistral, google=self.google, groq=self.groq_client
         )
 
         # Infraestructura agéntica
@@ -71,8 +71,8 @@ class ChatGUI:
                 r = self.groq_client.chat(messages, temperature=temperature, max_tokens=max_tokens)
                 if r:
                     return r
-            if self.github and self.github.client:
-                r = self.github.chat(messages, temperature=temperature, max_tokens=max_tokens)
+            if self.mistral and self.mistral.client:
+                r = self.mistral.chat(messages, temperature=temperature, max_tokens=max_tokens)
                 if r:
                     return r
             prompt = "\n".join(f"{m['role'].capitalize()}: {m['content']}" for m in messages)
@@ -311,6 +311,34 @@ class ChatGUI:
                 else:
                     mensaje = f"{mensaje}\n\nArchivo: {archivo_adjunto}"
 
+            # Limpiar historial / reset
+            if mensaje.lower() in ["/reset", "/borrar", "/limpiar", "/nuevo", "/clear"]:
+                self.historial_chat = []
+                self.contador_mensajes = 0
+                user_id = getattr(self, '_user_id', 'local_user')
+                # Limpiar también la BD persistente
+                try:
+                    from core.conversation_db import clear_user
+                    clear_user(user_id)
+                except Exception:
+                    pass
+                # Limpiar vocabulario/estilo/temas acumulados
+                try:
+                    self.herramientas.memory.clear_user_context(user_id)
+                except Exception:
+                    pass
+                # Limpiar VectorMemory del agente (RAG acumulado)
+                try:
+                    self.agent_memory.clear()
+                except Exception:
+                    pass
+                from core.config import _get_mode
+                if _get_mode() == "rai":
+                    self._mostrar_respuesta("ya wey, borre toda la conversacion. ahora si, q chingados kieres?")
+                else:
+                    self._mostrar_respuesta("🗑️ Listo, borré el historial. Empezamos de cero, ¿en qué te ayudo?")
+                return
+
             # Cambio de personalidad
             if mensaje.lower() in ["/puteado", "/raymundo", "/ray", "/malo"]:
                 resp = config_agente.cambiar_personalidad("puteado")
@@ -339,6 +367,30 @@ class ChatGUI:
             resultado = self.herramientas.procesar_mensaje(mensaje, af_delegar=af_del, af_disponible=af_dis)
 
             if resultado["ejecuto_herramienta"]:
+                # Manejar señal de reset del gestor de herramientas
+                if resultado.get("tipo") == "reset" or resultado.get("resultado") == "__RESET__":
+                    self.historial_chat = []
+                    self.contador_mensajes = 0
+                    user_id = getattr(self, '_user_id', 'local_user')
+                    try:
+                        from core.conversation_db import clear_user
+                        clear_user(user_id)
+                    except Exception:
+                        pass
+                    try:
+                        self.herramientas.memory.clear_user_context(user_id)
+                    except Exception:
+                        pass
+                    try:
+                        self.agent_memory.clear()
+                    except Exception:
+                        pass
+                    from core.config import _get_mode
+                    if _get_mode() == "rai":
+                        self._mostrar_respuesta("ya wey, borre toda la conversacion. ahora si, q chingados kieres?")
+                    else:
+                        self._mostrar_respuesta("🗑️ Listo, borré el historial. Empezamos de cero, ¿en qué te ayudo?")
+                    return
                 respuesta = resultado["resultado"]
             elif self._es_mensaje_simple(mensaje):
                 respuesta = self._chat_ollama(mensaje)
@@ -360,7 +412,8 @@ class ChatGUI:
 
     def _chat_ollama(self, mensaje):
         prompt_base = config_agente.get_prompt_sistema()
-        vocab_hint = self.herramientas.memory.get_vocabulario_hint()
+        user_id = getattr(self, '_user_id', 'local_user')
+        vocab_hint = self.herramientas.memory.get_vocabulario_hint(user_id=user_id)
         prompt = f"{prompt_base}{vocab_hint}\n\nUsuario: {mensaje}\nAsistente:"
         return self.ollama.generate(prompt, temperature=0.7) or "Error al conectar con Ollama"
 
@@ -369,8 +422,8 @@ class ChatGUI:
         self.contador_mensajes += 1
         respuesta = self.herramientas.chat_hibrido(mensaje) or "Error al conectar"
         self.historial_chat.append({"role": "assistant", "content": respuesta})
-        if len(self.historial_chat) > 20:
-            self.historial_chat = self.historial_chat[-20:]
+        if len(self.historial_chat) > 16:   # 8 pares máx para no sobrecargar el LLM
+            self.historial_chat = self.historial_chat[-16:]
         return respuesta
 
     # ───── Agéntico: progreso y aprobación ───────────────────

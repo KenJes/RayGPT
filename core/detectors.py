@@ -68,7 +68,7 @@ class DetectorIntenciones:
         "no me olvides", "no se me olvide", "no olvidar",
         "tengo que ir a", "tengo que hacer",
         "voy a ir", "iremos", "saldremos", "estaremos",
-        "compromiso", "meet ", "zoom ", "llamada", "videoconferencia",
+        "compromiso", "una llamada", "la llamada", "agendar llamada", "videollamada", "videoconferencia",
         "actividad", "tarea para",
         # Ver la agenda
         "mi agenda", "mis eventos", "mis citas",
@@ -115,7 +115,7 @@ class DetectorIntenciones:
         intencion_principal = max(scores, key=scores.get)
         confianza = scores[intencion_principal] / 10.0
 
-        if confianza < 0.15:
+        if confianza < 0.25:
             return {"intencion": "chat", "confianza": 1.0, "tema": mensaje, "detalles": {}}
 
         tema = self._extraer_tema(mensaje, intencion_principal)

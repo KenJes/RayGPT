@@ -78,7 +78,7 @@ CREDENTIALS_FILE = BASE_DIR / 'resources' / 'data' / 'google-credentials.json'
 METRICS_FILE = DATA_DIR / 'metrics.json'
 
 # Importar componentes desde core/
-from core.ai_clients import OllamaClient, GitHubModelsClient, GroqClient
+from core.ai_clients import OllamaClient, MistralClient, GroqClient
 from core.tools import GestorHerramientas
 from core.detectors import DetectorIdioma
 from core.config import config_agente as config_agente_module
@@ -93,6 +93,7 @@ from core.approval import approval_manager
 from core.conversation_db import ConversationDB
 from core.knowledge_db import KnowledgeBase
 from core.spotify_client import SpotifyClient, detect_spotify_intent
+from core.context_manager import ContextManager
 
 # ====================================
 # CONFIGURACIÓN DE FLASK
@@ -132,18 +133,23 @@ try:
         config_agente = json.load(f)
     logger.info("✅ Configuración cargada")
 
-    # Detectar modo de personalidad
-    _personality_mode = os.environ.get("PERSONALITY_MODE", "raymundo").lower()
-    logger.info(f"🎭 Personalidad activa: {'rAI (compa culero)' if _personality_mode == 'rai' else 'Raymundo (agente pro)'}")
+    # Detectar modo de personalidad — leer desde core.config que ya procesó el env var
+    from core.config import _PERSONALITY_MODE as _PM_STARTUP, PERSONALITY_FILE as _PF_STARTUP
+    logger.info("=" * 60)
+    logger.info(f"  PERSONALITY_MODE env  : {os.environ.get('PERSONALITY_MODE', '(no seteado — default raymundo)')}")
+    logger.info(f"  _PERSONALITY_MODE     : {_PM_STARTUP}")
+    logger.info(f"  Archivo de personalidad: {_PF_STARTUP}")
+    logger.info(f"  Archivo existe        : {_PF_STARTUP.exists()}")
+    logger.info("=" * 60)
     
     # Inicializar clientes AI
     ollama = OllamaClient()
-    github = GitHubModelsClient()
+    mistral = MistralClient()
     groq = GroqClient()  # Nuevo: Groq (14,400 RPD gratis)
     google = GoogleWorkspaceClient(str(CREDENTIALS_FILE))
     
     # Crear gestor de herramientas con Groq
-    gestor = GestorHerramientas(ollama, github, google, groq=groq)
+    gestor = GestorHerramientas(ollama, mistral, google, groq=groq)
     detector_idioma = DetectorIdioma()  # Bilingual personality routing
     
     # Inicializar metrics tracker
@@ -185,7 +191,7 @@ try:
     adapter_registry = build_registry(gestor, knowledge_base=knowledge_base, spotify_client=spotify_client)
 
     def _ai_chat_for_agent(messages, temperature=0.4, max_tokens=2000):
-        """Función de chat para el AgentLoop — Ollama primero, Groq/GitHub como refuerzo."""
+        """Función de chat para el AgentLoop — Ollama primero, Groq/Mistral como refuerzo."""
         from core.tools import es_rechazo_llm
         # 1. Ollama local (gratis, ilimitado)
         r = ollama.chat(messages, temperature=temperature, max_tokens=max_tokens)
@@ -196,9 +202,9 @@ try:
             r = groq.chat(messages, temperature=temperature, max_tokens=max_tokens)
             if r and not es_rechazo_llm(r):
                 return r
-        # 3. GitHub Models GPT-4o (rate limited)
-        if github and github.client:
-            r = github.chat(messages, temperature=temperature, max_tokens=max_tokens)
+        # 3. Mistral (rate limited)
+        if mistral and mistral.client:
+            r = mistral.chat(messages, temperature=temperature, max_tokens=max_tokens)
             if r and not es_rechazo_llm(r):
                 return r
         return ""
@@ -213,6 +219,13 @@ try:
         approval=approval_manager,
     )
     logger.info("✅ Infraestructura agéntica inicializada (adapters, loop, memory, logger)")
+
+    # Inicializar ContextManager centralizado
+    context_manager = ContextManager(
+        knowledge_base=knowledge_base,
+        memory_system=gestor.memory,
+    )
+    logger.info("✅ ContextManager inicializado (RAG + context injection)")
     
 except Exception as e:
     logger.error(f"❌ Error inicializando Raymundo: {e}")
@@ -266,6 +279,10 @@ def limpiar_historial(user_id):
 
 def get_tono_usuario(user_id):
     """Devuelve el tono activo para un usuario (per-user override o global)."""
+    # En modo rAI, ignorar cualquier tono guardado — rAI es SIEMPRE agresivo
+    from core.config import _PERSONALITY_MODE
+    if _PERSONALITY_MODE == "rai":
+        return None
     if user_id in personalidades_por_usuario:
         return personalidades_por_usuario[user_id].get("tono")
     return config_agente.get("personalidad", {}).get("tono", "amigable")
@@ -455,11 +472,12 @@ def _handle_spotify_command(mensaje: str) -> str | None:
 @app.route('/health', methods=['GET'])
 def health():
     """Endpoint de salud para verificar que el servidor está corriendo"""
+    from core.config import _PERSONALITY_MODE
     return jsonify({
         "status": "ok",
         "agent": "rAImundoGPT",
         "version": "2.0",
-        "personality": config_agente.get('personalidad', {}).get('tono', 'desconocido'),
+        "personality": _PERSONALITY_MODE,
         "spotify": "connected" if (spotify_client and spotify_client.is_authenticated) else "not_connected"
     })
 
@@ -553,7 +571,55 @@ def chat():
                 "respuesta": metrics.get_stats_formatted(),
                 "user_id": user_id
             })
+
+        # Comando de diagnóstico: modo actual
+        if mensaje.lower() in ['/modo', '/mode', '/debug', '/quien', '/quién']:
+            from core.config import _PERSONALITY_MODE as _PM_D, PERSONALITY_FILE as _PF_D
+            env_val = os.environ.get('PERSONALITY_MODE', '(no seteado)')
+            prompt_preview = _PF_D.read_text(encoding='utf-8')[:80].replace('\n', ' ') if _PF_D.exists() else 'ARCHIVO NO EXISTE'
+            return jsonify({
+                "respuesta": (
+                    f"MODO ACTIVO: {_PM_D}\n"
+                    f"ENV PERSONALITY_MODE: {env_val}\n"
+                    f"Archivo: {_PF_D.name}\n"
+                    f"Preview: {prompt_preview}..."
+                ),
+                "user_id": user_id
+            })
         
+        # ── Comando /reset: borrar caché de conversaciones ────────
+        if mensaje.lower() in ['/reset', '/borrar', '/limpiar', '/nuevo', '/clear']:
+            # 1. SQLite: mensajes + resúmenes del usuario
+            limpiar_historial(user_id)
+            # 2. Limpiar personalidad override del usuario
+            if user_id in personalidades_por_usuario:
+                del personalidades_por_usuario[user_id]
+            # 3. Limpiar override de idioma
+            if 'idioma_override' in conversaciones and user_id in conversaciones.get('idioma_override', {}):
+                del conversaciones['idioma_override'][user_id]
+            # 4. Limpiar vocabulario/estilo/temas acumulados del usuario (memoria_agente.json)
+            #    SIN borrar documentos, CVs ni imágenes
+            try:
+                gestor.memory.clear_user_context(user_id)
+            except Exception:
+                pass
+            # 5. Limpiar VectorMemory del agente (RAG acumulado)
+            try:
+                agent_memory.clear()
+            except Exception:
+                pass
+            logger.info(f"🗑️ {user_name or user_id} ejecutó /reset — historial + contexto borrados")
+            from core.config import _PERSONALITY_MODE as _PM_RESET
+            if _PM_RESET == 'rai':
+                return jsonify({
+                    "respuesta": "ya wey, borre toda la conversacion. ahora si, q chingados kieres?",
+                    "user_id": user_id
+                })
+            return jsonify({
+                "respuesta": "🗑️ Listo, borré todo el historial de nuestra conversación. Empezamos de cero, ¿en qué te ayudo?",
+                "user_id": user_id
+            })
+
         # Comandos de cambio de personalidad — ahora son PER-USER
         if mensaje.lower() in ['/puteado', '/putedo', '/rai']:
             set_tono_usuario(user_id, 'puteado')
@@ -564,6 +630,13 @@ def chat():
             })
         
         if mensaje.lower() in ['/amigable', '/raymundo', '/ray', '/friendly']:
+            from core.config import _PERSONALITY_MODE as _PM_CHECK
+            if _PM_CHECK == 'rai':
+                # En modo rAI el servidor no cambia a amigable nunca
+                return jsonify({
+                    "respuesta": "nel wey, no me conviertas en esa nenaza. soy rAI y asi me quedo, pendejo",
+                    "user_id": user_id
+                })
             set_tono_usuario(user_id, 'amigable')
             logger.info(f"🔄 {user_name or user_id} cambió a personalidad AMIGABLE")
             return jsonify({
@@ -608,19 +681,12 @@ def chat():
         if mensaje.lower() in ['rate limit', 'ratelimit', 'limite', 'límite', '429']:
             info_rate = """⚠️ **RATE LIMIT ALCANZADO**
 
-Has superado los límites del Free Tier de GitHub Models:
-
-📊 **Límites:**
-• 15 RPM (Requests por minuto)
-• 150 RPD (Requests por día)
-• 150K TPM (Tokens por minuto)
+Has superado los límites del API:
 
 🔄 **No te preocupes:**
 Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando sin interrupciones.
 
-⏰ **Reinicio de límites:**
-• RPM: Cada minuto
-• RPD: A las 00:00 UTC
+⏰ Los límites se reinician periódicamente.
 
 💡 **Tip:** Escribe `/raymundo stats` para ver tu uso actual.
 """
@@ -636,11 +702,40 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
                 mensaje_limpio = mensaje_limpio[len(cmd):].strip()
                 break
 
-        # Detectar cambio de personalidad en lenguaje natural
-        cambio_natural = detectar_cambio_personalidad_natural(mensaje_limpio)
-        if cambio_natural:
-            set_tono_usuario(user_id, cambio_natural)
-            logger.info(f"🔄 {user_name or user_id} cambió a {cambio_natural} (lenguaje natural)")
+        # ── /reset después de limpiar prefijo (e.g. "/Raymundo /reset") ──
+        if mensaje_limpio.lower() in ['/reset', '/borrar', '/limpiar', '/nuevo', '/clear', 'reset']:
+            limpiar_historial(user_id)
+            if user_id in personalidades_por_usuario:
+                del personalidades_por_usuario[user_id]
+            if 'idioma_override' in conversaciones and user_id in conversaciones.get('idioma_override', {}):
+                del conversaciones['idioma_override'][user_id]
+            try:
+                gestor.memory.clear_user_context(user_id)
+            except Exception:
+                pass
+            try:
+                agent_memory.clear()
+            except Exception:
+                pass
+            logger.info(f"🗑️ {user_name or user_id} ejecutó /reset — historial + contexto + memoria borrados")
+            from core.config import _PERSONALITY_MODE as _PM_RESET2
+            if _PM_RESET2 == 'rai':
+                return jsonify({
+                    "respuesta": "ya wey, borre toda la conversacion y la memoria. ahora si, q chingados kieres?",
+                    "user_id": user_id
+                })
+            return jsonify({
+                "respuesta": "🗑️ Listo, borré todo el historial y la memoria de nuestra conversación. Empezamos de cero, ¿en qué te ayudo?",
+                "user_id": user_id
+            })
+
+        # Detectar cambio de personalidad en lenguaje natural (omitir en modo rAI)
+        from core.config import _PERSONALITY_MODE as _PM_CHECK2
+        if _PM_CHECK2 != 'rai':
+            cambio_natural = detectar_cambio_personalidad_natural(mensaje_limpio)
+            if cambio_natural:
+                set_tono_usuario(user_id, cambio_natural)
+                logger.info(f"🔄 {user_name or user_id} cambió a {cambio_natural} (lenguaje natural)")
 
         logger.info(f"📩 [{user_name or user_id}] {mensaje_limpio[:60]}...")
 
@@ -718,12 +813,12 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
 
                 # Rastrear métricas
                 tokens_groq = groq.last_tokens_used if groq and groq.client else 0
-                tokens_gpt4o = github.last_tokens_used
+                tokens_mistral = mistral.last_tokens_used
                 tokens_ollama = ollama.last_tokens_used
-                modelo = "groq" if tokens_groq > 0 else "gpt4o" if tokens_gpt4o > 0 else "ollama"
+                modelo = "groq" if tokens_groq > 0 else "mistral" if tokens_mistral > 0 else "ollama"
                 metrics.track_request(
                     tipo="agent_loop",
-                    tokens_used=tokens_groq or tokens_gpt4o or tokens_ollama,
+                    tokens_used=tokens_groq or tokens_mistral or tokens_ollama,
                     modelo=modelo,
                     tiempo_respuesta=tiempo_respuesta,
                     user_id=user_id,
@@ -756,6 +851,29 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
         )
         
         if resultado_herramienta['ejecuto_herramienta']:
+            # Manejar señal de reset del gestor de herramientas
+            if resultado_herramienta.get('tipo') == 'reset' or resultado_herramienta.get('resultado') == '__RESET__':
+                limpiar_historial(user_id)
+                try:
+                    gestor.memory.clear_user_context(user_id)
+                except Exception:
+                    pass
+                try:
+                    agent_memory.clear()
+                except Exception:
+                    pass
+                logger.info(f"🗑️ {user_name or user_id} ejecutó /reset (via herramienta) — historial + memoria borrados")
+                from core.config import _PERSONALITY_MODE as _PM_RESET3
+                if _PM_RESET3 == 'rai':
+                    return jsonify({
+                        "respuesta": "ya wey, borre toda la conversacion y la memoria. ahora si, q chingados kieres?",
+                        "user_id": user_id
+                    })
+                return jsonify({
+                    "respuesta": "🗑️ Listo, borré todo el historial y la memoria de nuestra conversación. Empezamos de cero, ¿en qué te ayudo?",
+                    "user_id": user_id
+                })
+
             respuesta = limpiar_formato_markdown(resultado_herramienta['resultado'])
             archivo_info = resultado_herramienta.get('archivo')
             
@@ -798,10 +916,10 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
             
             # Rastrear métricas (tokens del último modelo usado)
             tokens_ollama = ollama.last_tokens_used
-            tokens_gpt4o = github.last_tokens_used
+            tokens_mistral = mistral.last_tokens_used
             tokens_groq = groq.last_tokens_used if groq and groq.client else 0
             
-            # Determinar qué modelo se usó (prioridad: Groq > GPT-4o > Ollama)
+            # Determinar qué modelo se usó (prioridad: Groq > Mistral > Ollama)
             if tokens_groq > 0:
                 metrics.track_request(
                     tipo=archivo_info.get('tipo', 'chat') if archivo_info else 'chat',
@@ -810,11 +928,11 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
                     tiempo_respuesta=tiempo_respuesta,
                     user_id=user_id
                 )
-            elif tokens_gpt4o > 0:
+            elif tokens_mistral > 0:
                 metrics.track_request(
                     tipo=archivo_info.get('tipo', 'chat') if archivo_info else 'chat',
-                    tokens_used=tokens_gpt4o,
-                    modelo='gpt4o',
+                    tokens_used=tokens_mistral,
+                    modelo='mistral',
                     tiempo_respuesta=tiempo_respuesta,
                     user_id=user_id
                 )
@@ -837,7 +955,7 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
                 )
             
             logger.info(f"✅ Respuesta generada ({len(respuesta)} caracteres)")
-            logger.info(f"   • Tiempo: {tiempo_respuesta:.2f}s | Groq: {tokens_groq} | GPT-4o: {tokens_gpt4o} | Ollama: {tokens_ollama}")
+            logger.info(f"   • Tiempo: {tiempo_respuesta:.2f}s | Groq: {tokens_groq} | Mistral: {tokens_mistral} | Ollama: {tokens_ollama}")
             
             # Guardar en BD persistente
             agregar_mensaje(user_id, "user", mensaje_limpio)
@@ -859,21 +977,29 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
             
             return jsonify(response_data)
         else:
-            # Usar chat híbrido normal con soporte bilingüe
+            # Usar chat híbrido normal con soporte bilingüe + ContextManager
             idioma_override = conversaciones.get('idioma_override', {}).get(user_id)
+            idioma = idioma_override or 'es'
             # Obtener historial completo (resúmenes + mensajes recientes)
             conv_context = get_contexto_completo(user_id)
-            # Buscar conocimiento relevante en la KB (filtrado por usuario)
-            kb_context = knowledge_base.build_knowledge_context(query=mensaje_limpio, user_id=user_id)
+            # Construir system prompt enriquecido con ContextManager
+            system_prompt = context_manager.build_system_prompt(
+                user_id=user_id,
+                user_name=user_name,
+                query=mensaje_limpio,
+                tono_override=get_tono_usuario(user_id),
+                usuario_agresivo=usuario_agresivo,
+                idioma=idioma,
+            )
             respuesta = limpiar_formato_markdown(gestor.chat_hibrido(
-                mensaje,
+                mensaje_limpio,
                 idioma_override=idioma_override,
                 user_name=user_name,
                 user_id=user_id,
                 tono_override=get_tono_usuario(user_id),
                 usuario_agresivo=usuario_agresivo,
                 history=conv_context,
-                knowledge_context=kb_context,
+                system_prompt=system_prompt,
             ))
             
             # Calcular tiempo de respuesta
@@ -881,7 +1007,7 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
             
             # Rastrear métricas
             tokens_ollama = ollama.last_tokens_used
-            tokens_gpt4o = github.last_tokens_used
+            tokens_mistral = mistral.last_tokens_used
             tokens_groq = groq.last_tokens_used if groq and groq.client else 0
             
             if tokens_groq > 0:
@@ -892,11 +1018,11 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
                     tiempo_respuesta=tiempo_respuesta,
                     user_id=user_id
                 )
-            elif tokens_gpt4o > 0:
+            elif tokens_mistral > 0:
                 metrics.track_request(
                     tipo='chat',
-                    tokens_used=tokens_gpt4o,
-                    modelo='gpt4o',
+                    tokens_used=tokens_mistral,
+                    modelo='mistral',
                     tiempo_respuesta=tiempo_respuesta,
                     user_id=user_id
                 )
@@ -910,7 +1036,7 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
                 )
             
             logger.info(f"✅ Respuesta generada ({len(respuesta)} caracteres)")
-            logger.info(f"   • Tiempo: {tiempo_respuesta:.2f}s | Groq: {tokens_groq} | GPT-4o: {tokens_gpt4o} | Ollama: {tokens_ollama}")
+            logger.info(f"   • Tiempo: {tiempo_respuesta:.2f}s | Groq: {tokens_groq} | Mistral: {tokens_mistral} | Ollama: {tokens_ollama}")
             
             # Guardar en BD persistente
             agregar_mensaje(user_id, "user", mensaje_limpio)
@@ -1221,7 +1347,7 @@ def audio_chat():
             messages.extend(conv_context)
             messages.append({"role": "user", "content": texto})
             
-            respuesta_ai = groq.chat(messages) or github.chat(messages) or ollama.generate(prompt_sistema + "\n\n" + texto)
+            respuesta_ai = groq.chat(messages) or mistral.chat(messages) or ollama.generate(prompt_sistema + "\n\n" + texto)
             respuesta = respuesta_ai or "No pude generar una respuesta"
             
             agregar_mensaje(user_id, "user", texto)

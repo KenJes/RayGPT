@@ -25,10 +25,10 @@ from typing import Callable
 _DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "conversaciones.db"
 
 # Cuántos pares (user+assistant) recientes se envían completos al LLM
-RECENT_PAIRS = 20  # 40 mensajes
+RECENT_PAIRS = 8   # 16 mensajes = contexto manejable sin sobrecargar el LLM
 
 # Cuántos mensajes viejos se resumen para dar contexto largo
-SUMMARY_WINDOW = 100  # mensajes antiguos a considerar para resumen
+SUMMARY_WINDOW = 60  # mensajes antiguos a considerar para resumen
 
 
 class ConversationDB:
@@ -268,3 +268,8 @@ def agregar_mensaje(user_id: str, role: str, content: str):
 def get_contexto_completo(user_id: str, summarize_fn=None) -> list[dict]:
     """Historial + resúmenes para el LLM."""
     return _db.build_context_messages(user_id, summarize_fn=summarize_fn)
+
+
+def clear_user(user_id: str):
+    """Borra TODO el historial y resúmenes de un usuario."""
+    _db.clear_history(user_id)

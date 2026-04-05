@@ -161,6 +161,27 @@ class MemorySystem:
             f"palabras forzadamente, úsalas solo si fluye natural con tu personalidad."
         )
 
+    def clear_user_context(self, user_id: str):
+        """
+        Borra el contexto conversacional acumulado de un usuario:
+        vocabulario, estilo y temas frecuentes.
+        NO borra documentos ni imágenes (esos son datos permanentes).
+        Usado por el comando /reset.
+        """
+        changed = False
+        # Buckets per-user
+        for bucket in ("estilo_por_usuario", "temas_por_usuario", "vocabulario_por_usuario"):
+            if user_id in self.memory.get(bucket, {}):
+                del self.memory[bucket][user_id]
+                changed = True
+        # Buckets globales (usados por la GUI local)
+        for bucket in ("estilo_usuario", "temas_usuario", "vocabulario_usuario"):
+            if self.memory.get(bucket):
+                self.memory[bucket] = {}
+                changed = True
+        if changed:
+            self.save_memory()
+
     def get_temas_frecuentes(self, user_id=None, top_n: int = 10) -> list:
         """Devuelve los temas/palabras clave más frecuentes del usuario (para contexto futuro)."""
         if user_id:

@@ -18,7 +18,8 @@ RESOURCES_DIR = BASE_DIR / "resources"
 # Selección de personalidad via variable de entorno PERSONALITY_MODE
 # "raymundo" (default) = agente profesional de Axoloit
 # "rai"                = compa agresivo, déspota y chistoso
-_PERSONALITY_MODE = os.environ.get("PERSONALITY_MODE", "raymundo").lower()
+# Leído aquí solo como fallback; la función _get_mode() lo lee en cada llamada.
+_PERSONALITY_MODE = os.environ.get("PERSONALITY_MODE", "raymundo").lower().strip()
 if _PERSONALITY_MODE == "rai":
     PERSONALITY_FILE = DATA_DIR / "personalidad_rai.md"
 else:
@@ -40,11 +41,22 @@ else:
 # ConfigAgente
 # ═══════════════════════════════════════════════════════════════
 
+def _get_mode() -> str:
+    """Lee PERSONALITY_MODE del entorno en cada llamada — nunca usa caché de módulo."""
+    return os.environ.get("PERSONALITY_MODE", "raymundo").lower().strip()
+
+
+def _get_personality_file() -> Path:
+    """Devuelve el Path del archivo de personalidad correcto según el modo actual."""
+    return DATA_DIR / ("personalidad_rai.md" if _get_mode() == "rai" else "personalidad_raymundo.md")
+
+
 def _load_personality_file() -> str | None:
     """Lee el archivo de personalidad según PERSONALITY_MODE (raymundo o rai)."""
-    if PERSONALITY_FILE.exists():
+    pfile = _get_personality_file()
+    if pfile.exists():
         try:
-            return PERSONALITY_FILE.read_text(encoding="utf-8").strip()
+            return pfile.read_text(encoding="utf-8").strip()
         except Exception:
             pass
     return None
@@ -58,7 +70,7 @@ class ConfigAgente(dict):
         self.config = self
 
     def get_nombre_agente(self):
-        if _PERSONALITY_MODE == "rai":
+        if _get_mode() == "rai":
             return "rAI"
         return self.config.get("personalidad", {}).get("nombre", "Raymundo")
 
@@ -130,7 +142,7 @@ class AppConfig:
     def __init__(self):
         self.ollama_url = os.environ.get("OLLAMA_URL", "http://localhost:11434")
         self.ollama_model = os.environ.get("OLLAMA_MODEL", "llama3.1:8b")
-        self.github_token = os.environ.get("GITHUB_TOKEN")
+        self.mistral_api_key = os.environ.get("MISTRAL_API_KEY")
 
         creds_env = os.environ.get("GOOGLE_CREDENTIALS_FILE")
         default_creds = RESOURCES_DIR / "data" / "google-credentials.json"

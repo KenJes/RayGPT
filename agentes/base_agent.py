@@ -26,14 +26,14 @@ else:
     load_dotenv()
 
 # ── Re-exportar clientes desde core/ ──────────────────────────
-from core.ai_clients import OllamaClient, GitHubModelsClient, GroqClient, llamar_ia  # noqa: E402
+from core.ai_clients import OllamaClient, MistralClient, GroqClient, llamar_ia  # noqa: E402
 from core.web_scraper import WebScraper  # noqa: E402
 from core.config import config_agente  # noqa: E402
 
 # ── URLs / credenciales ───────────────────────────────────────
 OLLAMA_URL   = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.1:8b")
-GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN")
+MISTRAL_API_KEY = os.environ.get("MISTRAL_API_KEY")
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 
 
@@ -42,9 +42,9 @@ def get_ollama_client():
     return OllamaClient(url=OLLAMA_URL, model=OLLAMA_MODEL)
 
 
-def get_github_client():
-    """Retorna GitHubModelsClient configurado."""
-    return GitHubModelsClient(token=GITHUB_TOKEN)
+def get_mistral_client():
+    """Retorna MistralClient configurado."""
+    return MistralClient(api_key=MISTRAL_API_KEY)
 
 
 def get_groq_client():

@@ -14,7 +14,7 @@
       "temperatura_default": 0.6,
       "temperatura_optimizacion": 0.2
     },
-    "github_models": {
+    "mistral": {
       "temperatura": 0.7
     }
   },

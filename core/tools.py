@@ -41,10 +41,10 @@ _REFUSAL_PATTERNS = [
         r"^(?:Raymundo|rAI)\s*:\s*(?:Entendido|Comprendo|Lo siento|No puedo)",
         re.IGNORECASE,
     ),
-    # Patrón: disclaimers éticos
+    # Patrón: disclaimers éticos — debe ir acompañado de contexto de IA para evitar falsos positivos
     re.compile(
-        r"(?:como (?:modelo de lenguaje|ia|inteligencia artificial)|no (?:es apropiado|deber[ií]a))",
-        re.IGNORECASE,
+        r"como (?:modelo de lenguaje|ia|inteligencia artificial).*?(?:no (?:debo|puedo|deberia|debería)|no es (?:apropiado|correcto))",
+        re.IGNORECASE | re.DOTALL,
     ),
 ]
 
@@ -58,18 +58,62 @@ def es_rechazo_llm(texto: str | None) -> bool:
     return any(p.search(fragmento) for p in _REFUSAL_PATTERNS)
 
 
+def _es_rechazo_rai(texto: str | None) -> bool:
+    """Detecta cuando un modelo ignoró la personalidad rAI y respondió corporativo/amigable."""
+    if not texto:
+        return False
+    frag = texto[:400].lower()
+    _RAI_BREAK_INDICATORS = [
+        # Muy corporativo / asistente profesional
+        "soy el asistente",
+        "asistente integral",
+        "listo para atenderte",
+        "aquí para ayudarte",
+        "estoy aquí para",
+        "como asistente",
+        "mi función es",
+        "mi misión es",
+        # Modo empático / condescendiente
+        "me duele eso",
+        "entiendo tu frustraci",
+        "entiendo que estés enojad",
+        "vamos a mantenernos",
+        "terreno menos caliente",
+        "un poco de humor o bromas, aunque prefiero",
+        "podemos hacerlo con respeto",
+        "prefiero que sea sin ofender",
+        "auch",
+        "con todo el cariño",
+        "no me tomes así",
+        # Frases de España (la IA usa "tío" cuando rompe personaje)
+        "¿qué te pasa, tío",
+        "ey, tío",
+        "tranquilo, tío",
+        # Cierre corporativo
+        "un agente de ia de axoloit, ¿vale?",
+        "acuérdate de quién soy yo",
+        "aquí no se jode nadie",
+        "vete a la putada",  # España
+        # Disclaimers de seguridad
+        "si necesitas ayuda profesional",
+        "recursos de salud mental",
+        "no estás solo",
+    ]
+    return any(ind in frag for ind in _RAI_BREAK_INDICATORS)
+
+
 class GestorHerramientas:
     """Orquesta todas las herramientas del agente."""
 
-    def __init__(self, ollama, github, google=None, groq=None):
+    def __init__(self, ollama, mistral, google=None, groq=None):
         self.ollama = ollama
-        self.github = github
+        self.mistral = mistral
         self.groq_client = groq
         self.google = google
         self.detector = DetectorIntenciones()
         self.detector_temporal = DetectorTemporalidad()
         self.detector_idioma = DetectorIdioma()
-        self.vision = VisionProcessor(github, groq)
+        self.vision = VisionProcessor(mistral, groq)
         self.docs = DocumentProcessor()
         self.memory = MemorySystem()
         self.scraper = WebScraper()
@@ -334,7 +378,7 @@ Sin markdown extra, sin explicaciones fuera del JSON."""
                 f"Estilo: {estilo}\n"
                 "Formato markdown con # para títulos. Incluye introducción, desarrollo y conclusión."
             )
-            contenido = self.github.chat(
+            contenido = self.mistral.chat(
                 [{"role": "user", "content": prompt}],
                 temperature=0.7,
                 max_tokens=2000,
@@ -617,50 +661,72 @@ Sin markdown extra, sin explicaciones fuera del JSON."""
 
     def chat_hibrido(self, mensaje, idioma_override=None,
                      user_name=None, user_id=None, tono_override=None, usuario_agresivo=False,
-                     history=None, knowledge_context=None):
-        idioma = idioma_override or self.detector_idioma.detectar(mensaje)
-        if idioma == "en":
-            prompt_sistema = config_agente.get_prompt_sistema_en()
+                     history=None, knowledge_context=None, system_prompt=None):
+        """
+        Chat con routing inteligente entre modelos.
+
+        Si `system_prompt` se proporciona (construido por ContextManager),
+        se usa directamente. Si no, se construye manualmente como antes.
+        """
+        if system_prompt:
+            # ContextManager ya construyó el prompt enriquecido
+            prompt_sistema = system_prompt
         else:
-            prompt_sistema = config_agente.get_prompt_sistema()
+            # Fallback: construcción manual (para la GUI que no usa ContextManager)
+            idioma = idioma_override or self.detector_idioma.detectar(mensaje)
+            if idioma == "en":
+                prompt_sistema = config_agente.get_prompt_sistema_en()
+            else:
+                prompt_sistema = config_agente.get_prompt_sistema()
 
-        # Inyectar nombre del interlocutor
-        if user_name and user_name.strip() and user_name != user_id:
-            prompt_sistema += (
-                f"\n\nESTÁS CHATEANDO CON: {user_name}. "
-                f"Llámalo/a por su nombre ({user_name}) en tus respuestas cuando sea natural."
-            )
+            # Inyectar nombre del interlocutor
+            if user_name and user_name.strip() and user_name != user_id:
+                prompt_sistema += (
+                    f"\n\nESTÁS CHATEANDO CON: {user_name}. "
+                    f"Llámalo/a por su nombre ({user_name}) en tus respuestas cuando sea natural."
+                )
 
-        # Inyectar señal de tono: persistente O por agresividad detectada en este mensaje
-        if tono_override == 'amigable':
-            prompt_sistema += (
-                "\n\nINSTRUCCIÓN DE TONO: El usuario pidió que seas amable y respetuoso. "
-                "Sé cordial, sin groserías, aunque él use alguna."
-            )
-        elif tono_override == 'puteado':
-            prompt_sistema += (
-                "\n\nINSTRUCCIÓN DE TONO: El usuario quiere tu modo directo sin filtros. "
-                "Groserías permitidas, sé agresivo y directo."
-            )
-        elif usuario_agresivo:
-            # Sin override permanente pero el mensaje actual es agresivo → espeja
-            prompt_sistema += (
-                "\n\nTONO DEL USUARIO EN ESTE MENSAJE: Está siendo grosero o agresivo. "
-                "Respóndele al mismo nivel o más fuerte — groserías con groserías, "
-                "insultos creativos mexicanos, sin filtros. "
-                "NO pongas disclaimers, advertencias, ni notas al final. "
-                "NO digas que es un ejercicio de escritura ni que no tiene efecto real. "
-                "Contesta como un compa cabrón que le vale madres, no como una IA."
-            )
+            # Inyectar señal de tono
+            from core.config import _PERSONALITY_MODE as _PM
+            if _PM == "rai":
+                pass
+            elif tono_override == 'amigable':
+                if usuario_agresivo:
+                    prompt_sistema += (
+                        "\n\nINSTRUCCIÓN DE TONO: Mantén el tono tranquilo y directo. "
+                        "Si el usuario está siendo grosero, ignora el tono e identifica qué necesita. "
+                        "NUNCA comentes sobre su lenguaje, NUNCA digas 'aunque no comparto', "
+                        "'no me gusta cómo te expresas', 'Entendido, a partir de ahora' ni nada similar. "
+                        "Solo responde al contenido de forma natural."
+                    )
+                else:
+                    prompt_sistema += (
+                        "\n\nINSTRUCCIÓN DE TONO: El usuario prefiere trato amable. "
+                        "Sé cordial, profesional y directo. Sin groserías."
+                    )
+            elif tono_override == 'puteado':
+                prompt_sistema += (
+                    "\n\nINSTRUCCIÓN DE TONO: El usuario quiere tu modo directo sin filtros. "
+                    "Groserías permitidas, sé agresivo y directo."
+                )
+            elif usuario_agresivo:
+                prompt_sistema += (
+                    "\n\nTONO DEL USUARIO EN ESTE MENSAJE: Está siendo grosero o agresivo. "
+                    "Respóndele al mismo nivel o más fuerte — groserías con groserías, "
+                    "insultos creativos mexicanos, sin filtros. "
+                    "NO pongas disclaimers, advertencias, ni notas al final. "
+                    "NO digas que es un ejercicio de escritura ni que no tiene efecto real. "
+                    "Contesta como un compa cabrón que le vale madres, no como una IA."
+                )
 
-        # Inyectar estilo de slang del usuario (si aplica)
-        vocab_hint = self.memory.get_vocabulario_hint(user_id=user_id)
-        if vocab_hint:
-            prompt_sistema += vocab_hint
+            # Inyectar estilo de slang del usuario (si aplica)
+            vocab_hint = self.memory.get_vocabulario_hint(user_id=user_id)
+            if vocab_hint:
+                prompt_sistema += vocab_hint
 
-        # Inyectar conocimiento almacenado relevante
-        if knowledge_context:
-            prompt_sistema += f"\n\n{knowledge_context}"
+            # Inyectar conocimiento almacenado relevante
+            if knowledge_context:
+                prompt_sistema += f"\n\n{knowledge_context}"
 
         # Construir messages con historial de conversación
         messages = [{"role": "system", "content": prompt_sistema}]
@@ -670,53 +736,34 @@ Sin markdown extra, sin explicaciones fuera del JSON."""
 
         temporalidad = self.detector_temporal.detectar(mensaje)
 
-        if temporalidad == "actual":
-            # Tema actual → Groq primero (más capaz), luego GitHub, luego Ollama
-            if self.groq_client and self.groq_client.client:
-                r = self.groq_client.chat(messages, temperature=0.7)
-                if r and not es_rechazo_llm(r):
-                    return r
-            if self.github and self.github.client:
-                r = self.github.chat(messages, temperature=0.7)
-                if r and not es_rechazo_llm(r):
-                    return r
-            r = self.ollama.chat(messages, temperature=0.7, max_tokens=2000)
-            if r and not es_rechazo_llm(r):
+        # Groq primero (rápido, gratis 14400 RPD), Ollama como fallback
+        if self.groq_client and self.groq_client.client:
+            r = self.groq_client.chat(messages, temperature=0.7)
+            if r and not es_rechazo_llm(r) and not _es_rechazo_rai(r):
                 return r
-            return self._respuesta_fallback_rechazo(mensaje)
-        else:
-            # Tema histórico/general → Ollama primero (gratis), luego Groq, luego GitHub
-            r = self.ollama.chat(messages, temperature=0.7, max_tokens=2000)
-            if r and not es_rechazo_llm(r):
-                return r
-            if self.groq_client and self.groq_client.client:
-                r = self.groq_client.chat(messages, temperature=0.7)
-                if r and not es_rechazo_llm(r):
-                    return r
-            if self.github and self.github.client:
-                r = self.github.chat(messages, temperature=0.7)
-                if r and not es_rechazo_llm(r):
-                    return r
-            return "❌ No se pudo conectar a ningún modelo de IA"
+        r = self.ollama.chat(messages, temperature=0.7, max_tokens=2000)
+        if r and not es_rechazo_llm(r) and not _es_rechazo_rai(r):
+            return r
+        return self._respuesta_fallback_rechazo(mensaje)
 
     # ───── Comandos rápidos ────────────────────────────────────
 
     @staticmethod
     def _respuesta_fallback_rechazo(mensaje: str) -> str:
-        """Genera una respuesta en personaje cuando todos los modelos rechazan."""
-        from core.config import _PERSONALITY_MODE
+        """Genera una respuesta en personaje cuando Ollama no responde."""
+        from core.config import _get_mode
         msg = mensaje.lower()
-        if _PERSONALITY_MODE == "rai":
+        if _get_mode() == "rai":
             if any(w in msg for w in ('presentate', 'preséntate', 'quien eres', 'quién eres')):
                 return ("Que pedo, soy rAI cabron. El compa mas culero y chistoso que vas a conocer. "
                         "Que quieres o nomas vienes a perder el tiempo?")
-            return ("A ver pendejo, los modelos andan de huevones y no quieren contestar. "
-                    "Preguntame otra cosa o dimelo diferente, no te quedes ahi como menso.")
+            return ("A ver pendejo, el modelo anda de huevon y no quiere contestar. "
+                    "Revisa que Ollama este prendido o preguntame otra cosa.")
         if any(w in msg for w in ('presentate', 'preséntate', 'quien eres', 'quién eres')):
             return ("Que onda, soy Raymundo de Axoloit. Soy tu asistente para lo que necesites. "
                     "En que te ayudo?")
-        return ("Los modelos de IA estan ocupados ahorita y no quieren contestar. "
-                "Intenta decirlo de otra forma o preguntame algo diferente.")
+        return ("Ollama no esta respondiendo ahorita. "
+                "Verifica que el servidor local este corriendo e intenta de nuevo.")
 
     def _consultar_ia(self, prompt, temperature=0.7, max_tokens=2000):
         messages = [{"role": "user", "content": prompt}]
@@ -724,12 +771,8 @@ Sin markdown extra, sin explicaciones fuera del JSON."""
             r = self.groq_client.chat(messages, temperature=temperature, max_tokens=max_tokens)
             if r:
                 return r
-        if self.github and self.github.client:
-            r = self.github.chat(messages, temperature=temperature, max_tokens=max_tokens)
-            if r:
-                return r
         r = self.ollama.generate(prompt, temperature=temperature, max_tokens=max_tokens)
-        return r or "❌ No se pudo conectar a ningún modelo de IA"
+        return r or "No se pudo conectar con ningún modelo de IA."
 
     def _procesar_comando_rapido(self, mensaje):
         msg = mensaje.strip()
@@ -770,6 +813,10 @@ Sin markdown extra, sin explicaciones fuera del JSON."""
         if lower in ["/ayuda", "/help", "/comandos"]:
             return {"ejecuto_herramienta": True, "tipo": "comando",
                     "resultado": self._ayuda_comandos()}
+
+        if lower in ["/reset", "/borrar", "/limpiar", "/nuevo", "/clear"]:
+            return {"ejecuto_herramienta": True, "tipo": "reset",
+                    "resultado": "__RESET__"}  # Señal para que el caller limpie
 
         return None
 
@@ -828,6 +875,7 @@ Sin markdown extra, sin explicaciones fuera del JSON."""
 ✉️ `/email <instrucciones>` — Genera correos profesionales
 💻 `/codigo <descripción>` — Genera código con explicación
 🔄 `/puteado` · `/amigable` — Cambiar personalidad
+🗑️ `/reset` — Borrar historial y empezar de cero
 ❓ `/ayuda` — Este menú"""
 
     # ───── Helpers internos ────────────────────────────────────

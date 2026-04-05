@@ -508,8 +508,14 @@ _SIMPLE_PATTERNS = [
     r"^(?:hola|hey|buenos?\s+(?:d[ií]as?|tardes?|noches?)|qu[eé]\s+(?:onda|pedo)|c[oó]mo\s+est[aá]s?)\b",
     r"^(?:gracias|ok|vale|si|no|claro|ya|chido|órale)\s*[.!?]*$",
     r"^(?:qu[eé]\s+(?:es|son|significa)|cu[aá]l\s+es|d[oó]nde\s+(?:est[aá]|queda)|qui[eé]n\s+(?:es|fue))\b",
-    r"^(?:cu[aá]nto|cu[aá]ndo|por\s+qu[eé]|c[oó]mo)\b",
-]
+    r"^(?:cu[aá]nto|cu[aá]ndo|por\s+qu[eé]|c[oó]mo)\b",    # Preguntas de opinión/pensamiento — NUNCA son agénticas
+    r"qu[eé]\s+opinas\b",
+    r"qu[eé]\s+piensas\b",
+    r"qu[eé]\s+crees\b",
+    r"cu[aá]l\s+es\s+tu\s+opini[oó]n\b",
+    r"qu[eé]\s+te\s+parece\b",
+    r"te\s+gusta\b",
+    r"me\s+recomiendas\b",]
 
 
 def es_meta_compleja(mensaje: str, usuario_agresivo: bool = False) -> bool:
