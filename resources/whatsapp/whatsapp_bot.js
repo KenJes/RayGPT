@@ -11,6 +11,11 @@ const { Client, LocalAuth, MessageMedia } = require('whatsapp-web.js');
 const BOT_INSTANCE_ID = randomUUID().slice(0, 8);
 console.log(`🆔 Bot instance ID: ${BOT_INSTANCE_ID} (PID: ${process.pid})`);
 
+// Usuarios con wizard de planeación activo — bypass del filtro de comandos
+const activeWizardUsers = new Set();
+const botRespondingChats = new Set(); // Chats donde el bot está respondiendo (previene loops con fromMe)
+const audioModeChats = new Set();    // Chats con modo audio activo (/escuchar lo activa, /silenciar lo desactiva)
+
 const API_BASE_URL = process.env.RAIMUNDO_API_URL || 'http://127.0.0.1:5000';
 const CHAT_ENDPOINT = `${API_BASE_URL}/chat`;
 const HEALTH_ENDPOINT = `${API_BASE_URL}/health`;
@@ -106,6 +111,42 @@ async function enviarArchivoSiExiste(chatId, rutaArchivo, caption) {
   }
 }
 
+function normalizarArchivosRespuesta(respuesta) {
+  const archivos = [];
+
+  if (Array.isArray(respuesta?.archivos)) {
+    for (const archivo of respuesta.archivos) {
+      if (archivo && typeof archivo === 'object' && archivo.path) {
+        archivos.push(archivo);
+      }
+    }
+  }
+
+  if (!archivos.length && respuesta?.archivo) {
+    archivos.push({
+      path: respuesta.archivo,
+      tipo: respuesta.tipo_archivo,
+      filename: path.basename(respuesta.archivo)
+    });
+  }
+
+  return archivos;
+}
+
+async function enviarArchivosSiExisten(chatId, archivos) {
+  let enviados = 0;
+
+  for (const archivo of archivos) {
+    const caption = archivo.title || archivo.filename || archivo.tipo;
+    const enviado = await enviarArchivoSiExiste(chatId, archivo.path, caption);
+    if (enviado) {
+      enviados += 1;
+    }
+  }
+
+  return { enviados, total: archivos.length };
+}
+
 // Usar 'message_create' en lugar de 'message' para capturar TODOS los mensajes
 // incluyendo los que el usuario envía desde su propio dispositivo
 client.on('message_create', async message => {
@@ -117,6 +158,13 @@ client.on('message_create', async message => {
   // Detectar si es un mensaje de voz → procesar con STT + AI + TTS
   if (message.type === 'ptt' || message.type === 'audio') {
     if (message.fromMe) return;  // Ignorar audios propios
+
+    // Solo procesar si el chat tiene modo audio activo (activado con /escuchar)
+    if (!audioModeChats.has(message.from)) {
+      console.log(`⚠️  Audio ignorado — modo audio no activo en ${message.from}. Usa /escuchar para activarlo.`);
+      return;
+    }
+
     console.log(`🎤 Mensaje de voz recibido de ${message.from}`);
     const chatId = message.from;
     const userId = chatId;
@@ -131,8 +179,7 @@ client.on('message_create', async message => {
   if (message.hasMedia && (message.type === 'image' || message.type === 'document' || message.type === 'sticker')) {
     // Solo procesar si el caption (texto) trae un comando válido
     const caption = (message.body || '').trim();
-    const comandosPermitidos = ['/raymundo', '/rai', '/amigable', '/puteado', '/ray', '/putedo', '/friendly'];
-    const tieneComando = caption && comandosPermitidos.some(cmd => caption.toLowerCase().startsWith(cmd));
+    const tieneComando = caption && caption.startsWith('/');
 
     if (tieneComando) {
       try {
@@ -156,12 +203,22 @@ client.on('message_create', async message => {
     return;
   }
 
+  // Ignorar respuestas automáticas del bot (evita loops)
+  // Para mensajes fromMe: message.from = número propio, message.to = destino real
+  const _loopKey = message.fromMe ? (message.to || message.from) : message.from;
+  if (message.fromMe && botRespondingChats.has(_loopKey)) {
+    return;
+  }
+
   const texto = message.body.trim();
 
   // Determinar el chat correcto para responder
-  const chatId = message.fromMe ? message.to : message.from;
-  const userId = message.from;
+  // fromMe=true → message.from es el número propio, message.to es el grupo/contacto real
+  const chatId = message.fromMe ? (message.to || message.from) : message.from;
+  const userId = message.fromMe ? (message.to || message.from) : message.from;
+  botRespondingChats.add(chatId); // Marcar como "bot procesando" para prevenir loops
 
+  try {
   // Obtener nombre del contacto
   let userName = userId;
   try {
@@ -184,6 +241,18 @@ client.on('message_create', async message => {
     return;
   }
 
+  if (texto.toLowerCase() === '/escuchar') {
+    audioModeChats.add(chatId);
+    await message.reply('🎤 Modo audio activado. Ahora puedo escuchar mensajes de voz en este chat.');
+    return;
+  }
+
+  if (texto.toLowerCase() === '/silenciar') {
+    audioModeChats.delete(chatId);
+    await message.reply('🔇 Modo audio desactivado. Ya no procesaré mensajes de voz en este chat.');
+    return;
+  }
+
   if (texto.toLowerCase() === '/health') {
     try {
       const { data } = await axios.get(HEALTH_ENDPOINT, { timeout: 4000 });
@@ -194,12 +263,12 @@ client.on('message_create', async message => {
     return;
   }
 
-  // FILTRO PRINCIPAL: Solo procesar si comienza con comandos específicos
-  const comandosPermitidos = ['/raymundo', '/rai', '/amigable', '/puteado', '/ray', '/putedo', '/friendly',
-                              '/reset', '/borrar', '/limpiar', '/nuevo', '/clear'];
-  const tieneComando = comandosPermitidos.some(cmd => texto.toLowerCase().startsWith(cmd));
+  // FILTRO PRINCIPAL: Procesar cualquier mensaje que empiece con '/',
+  // O si el usuario tiene un wizard de planeación activo (respuestas sin /)
+  const tieneComando = texto.startsWith('/');
+  const userHasWizard = activeWizardUsers.has(userId);
 
-  if (!tieneComando) {
+  if (!tieneComando && !userHasWizard) {
     console.log(`⚠️  Mensaje ignorado (sin comando): ${texto.substring(0, 30)}...`);
     return;
   }
@@ -218,13 +287,21 @@ client.on('message_create', async message => {
     await message.reply('🤖 Procesando tu mensaje, dame un momento...');
     const respuesta = await enviarMensajeAlServidor(texto, userId, userName, imageBase64);
 
+    // Mantener estado del wizard en el bot para bypass del filtro de comandos
+    if (respuesta.wizard_active === true) {
+      activeWizardUsers.add(userId);
+    } else {
+      activeWizardUsers.delete(userId);
+    }
+
     if (respuesta.respuesta) {
       await client.sendMessage(chatId, respuesta.respuesta);
     }
 
-    if (respuesta.archivo) {
-      const enviado = await enviarArchivoSiExiste(chatId, respuesta.archivo, respuesta.tipo_archivo);
-      if (!enviado) {
+    const archivos = normalizarArchivosRespuesta(respuesta);
+    if (archivos.length) {
+      const { enviados, total } = await enviarArchivosSiExisten(chatId, archivos);
+      if (enviados < total) {
         await client.sendMessage(chatId, '⚠️  No pude enviar el archivo generado, revisa el servidor.');
       }
     }
@@ -243,6 +320,9 @@ client.on('message_create', async message => {
     }
     const detalle = error.response?.data?.error || error.message;
     await client.sendMessage(chatId, `🚨 Ocurrió un error: ${detalle}`);
+  }
+  } finally {
+    botRespondingChats.delete(chatId); // Liberar chat — ya no estamos respondiendo
   }
 });
 

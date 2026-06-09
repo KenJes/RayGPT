@@ -12,10 +12,62 @@ import os
 import re
 import subprocess
 import shlex
+import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from core.config import OUTPUT_DIR
+
+
+_NOTEBOOK_OUTPUT_DIR = OUTPUT_DIR / "notebooks"
+_ARTIFACT_OUTPUT_DIR = OUTPUT_DIR / "files"
+_ALLOWED_ARTIFACT_EXTENSIONS = {
+    ".css",
+    ".csv",
+    ".html",
+    ".js",
+    ".json",
+    ".md",
+    ".php",
+    ".py",
+    ".sql",
+    ".ts",
+    ".txt",
+    ".xml",
+    ".yaml",
+    ".yml",
+}
+_ARTIFACT_EXTENSION_ALIASES = {
+    "css": ".css",
+    "csv": ".csv",
+    "html": ".html",
+    "javascript": ".js",
+    "js": ".js",
+    "json": ".json",
+    "markdown": ".md",
+    "md": ".md",
+    "php": ".php",
+    "py": ".py",
+    "python": ".py",
+    "sql": ".sql",
+    "ts": ".ts",
+    "typescript": ".ts",
+    "txt": ".txt",
+    "text": ".txt",
+    "xml": ".xml",
+    "yaml": ".yaml",
+    "yml": ".yml",
+}
+_GOOGLE_EXPORT_FORMATS = {
+    "documento": "docx",
+    "hoja_calculo": "xlsx",
+    "presentacion": "pptx",
+}
+_GOOGLE_ID_KEYS = {
+    "documento": "document_id",
+    "hoja_calculo": "spreadsheet_id",
+    "presentacion": "presentation_id",
+}
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -35,6 +87,387 @@ class ToolAdapter:
         Returns: {"success": bool, "output": Any, "error": str | None}
         """
         raise NotImplementedError
+
+
+def _normalize_output(result: Any) -> tuple[bool, str]:
+    if isinstance(result, dict):
+        parts = []
+        for key in ("texto", "resultado", "output_text", "output"):
+            value = result.get(key)
+            if value:
+                parts.append(str(value))
+        path = result.get("path")
+        if path:
+            parts.append(f"Archivo generado: {path}")
+        if not parts:
+            parts.append(json.dumps(result, ensure_ascii=False, default=str))
+        output = "\n\n".join(parts)
+    else:
+        output = str(result or "")
+    output = output.strip()
+    success = bool(output) and not output.startswith("❌")
+    return success, output
+
+
+def _sanitize_filename(
+    filename: str | None,
+    *,
+    default_stem: str,
+    default_suffix: str,
+) -> str:
+    raw_name = Path(str(filename or "").strip()).name
+    stem = Path(raw_name).stem if raw_name else default_stem
+    suffix = Path(raw_name).suffix.lower() if raw_name else default_suffix
+
+    safe_stem = re.sub(r"[^A-Za-z0-9._-]+", "_", stem).strip("._-") or default_stem
+    safe_suffix = re.sub(r"[^A-Za-z0-9.]+", "", suffix).lower()
+    if not safe_suffix:
+        safe_suffix = default_suffix
+    if not safe_suffix.startswith("."):
+        safe_suffix = f".{safe_suffix}"
+    return f"{safe_stem}{safe_suffix}"
+
+
+def _sanitize_subdir(subdir: str | None) -> Path:
+    if not subdir:
+        return Path()
+    safe_parts = []
+    for part in Path(str(subdir)).parts:
+        if part in ("", ".", ".."):
+            continue
+        safe_part = re.sub(r"[^A-Za-z0-9_-]+", "_", part).strip("._-")
+        if safe_part:
+            safe_parts.append(safe_part)
+    return Path(*safe_parts) if safe_parts else Path()
+
+
+def _ensure_output_path(base_dir: Path, filename: str) -> Path:
+    candidate = (base_dir / filename).resolve()
+    output_root = OUTPUT_DIR.resolve()
+    if not str(candidate).startswith(str(output_root)):
+        raise ValueError(f"Solo se permite escribir bajo {OUTPUT_DIR}")
+    return candidate
+
+
+def _unique_output_path(base_dir: Path, filename: str) -> Path:
+    candidate = _ensure_output_path(base_dir, filename)
+    if not candidate.exists():
+        return candidate
+
+    stem = candidate.stem
+    suffix = candidate.suffix
+    for index in range(2, 1000):
+        alternative = candidate.with_name(f"{stem}_{index}{suffix}")
+        if not alternative.exists():
+            return alternative
+    raise ValueError("No se pudo generar un nombre de archivo único.")
+
+
+def _coerce_source_lines(content: Any) -> list[str]:
+    if content is None:
+        return []
+    if isinstance(content, list):
+        return [str(line) for line in content]
+    text = str(content)
+    if not text:
+        return []
+    lines = text.splitlines(keepends=True)
+    return lines or [text]
+
+
+def _build_notebook_cell(cell_type: str, content: Any) -> dict:
+    normalized_type = "code" if str(cell_type).lower().strip() == "code" else "markdown"
+    source = _coerce_source_lines(content)
+    if normalized_type == "code":
+        return {
+            "cell_type": "code",
+            "execution_count": None,
+            "metadata": {},
+            "outputs": [],
+            "source": source,
+        }
+    return {
+        "cell_type": "markdown",
+        "metadata": {},
+        "source": source,
+    }
+
+
+def _coerce_notebook_cells(args: dict) -> list[dict]:
+    raw_cells = args.get("cells")
+    if isinstance(raw_cells, str):
+        try:
+            raw_cells = json.loads(raw_cells)
+        except Exception:
+            raw_cells = [{"type": "markdown", "content": raw_cells}]
+
+    if not raw_cells:
+        fallback_content = args.get("content") or args.get("texto") or ""
+        return [_build_notebook_cell("markdown", fallback_content)] if str(fallback_content).strip() else []
+
+    cells = []
+    if not isinstance(raw_cells, list):
+        raw_cells = [raw_cells]
+
+    for raw_cell in raw_cells:
+        if isinstance(raw_cell, dict):
+            cell_type = (
+                raw_cell.get("type")
+                or raw_cell.get("cell_type")
+                or ("code" if raw_cell.get("code") is not None else "markdown")
+            )
+            content = (
+                raw_cell.get("content")
+                if raw_cell.get("content") is not None
+                else raw_cell.get("source")
+            )
+            if content is None:
+                content = raw_cell.get("markdown")
+            if content is None:
+                content = raw_cell.get("code")
+        else:
+            cell_type = "markdown"
+            content = raw_cell
+        cells.append(_build_notebook_cell(cell_type, content))
+    return cells
+
+
+def _build_notebook_metadata(language: str | None) -> dict:
+    normalized = str(language or "python").lower().strip()
+    kernels = {
+        "javascript": ("javascript", "JavaScript", "javascript"),
+        "js": ("javascript", "JavaScript", "javascript"),
+        "php": ("php", "PHP", "php"),
+        "py": ("python3", "Python 3", "python"),
+        "python": ("python3", "Python 3", "python"),
+    }
+    kernel_name, display_name, language_name = kernels.get(normalized, (normalized or "python3", normalized.title() or "Python 3", normalized or "python"))
+    return {
+        "kernelspec": {
+            "display_name": display_name,
+            "language": language_name,
+            "name": kernel_name,
+        },
+        "language_info": {
+            "name": language_name,
+        },
+    }
+
+
+def _normalize_artifact_extension(filename: str | None, artifact_type: str | None) -> str:
+    suffix = Path(str(filename or "")).suffix.lower()
+    if suffix:
+        return suffix
+    normalized_type = str(artifact_type or "txt").strip().lower().lstrip(".")
+    return _ARTIFACT_EXTENSION_ALIASES.get(normalized_type, f".{normalized_type}" if normalized_type else ".txt")
+
+
+def _artifact_descriptor(path: Path, *, artifact_type: str, title: str | None = None) -> dict:
+    return {
+        "path": str(path),
+        "filename": path.name,
+        "tipo": artifact_type,
+        "title": title or path.stem,
+    }
+
+
+def _local_artifacts_from_result(result: Any) -> list[dict]:
+    if not isinstance(result, dict):
+        return []
+
+    raw_path = result.get("path") or result.get("imagen_path")
+    if not raw_path:
+        return []
+
+    path = Path(str(raw_path)).resolve()
+    if not path.exists() or not path.is_file():
+        return []
+
+    artifact_type = path.suffix.lstrip(".") or "file"
+    title = result.get("title") or result.get("titulo") or path.stem
+    return [_artifact_descriptor(path, artifact_type=artifact_type, title=title)]
+
+
+def _extract_first_url(text: str | None) -> str | None:
+    if not text:
+        return None
+    match = re.search(r"https?://\S+", str(text))
+    if not match:
+        return None
+    return match.group(0).rstrip(").,;]")
+
+
+def _google_workspace_artifact(
+    *,
+    artifact_type: str,
+    google_id: str,
+    google_url: str | None = None,
+    title: str | None = None,
+) -> dict:
+    export_format = _GOOGLE_EXPORT_FORMATS.get(artifact_type)
+    filename = None
+    if export_format:
+        filename = _sanitize_filename(
+            title,
+            default_stem=artifact_type,
+            default_suffix=f".{export_format}",
+        )
+    return {
+        "provider": "google_workspace",
+        "kind": artifact_type,
+        "tipo": artifact_type,
+        "google_id": google_id,
+        "google_url": google_url,
+        "title": title or artifact_type,
+        "filename": filename,
+        "export_format": export_format,
+    }
+
+
+def _google_artifacts_from_result(result: dict, *, fallback_title: str | None = None) -> list[dict]:
+    archivo_info = result.get("archivo")
+    if not isinstance(archivo_info, dict):
+        return []
+
+    artifact_type = str(archivo_info.get("tipo") or "").strip().lower()
+    id_key = _GOOGLE_ID_KEYS.get(artifact_type)
+    google_id = archivo_info.get(id_key) if id_key else None
+    if not artifact_type or not google_id:
+        return []
+
+    return [
+        _google_workspace_artifact(
+            artifact_type=artifact_type,
+            google_id=str(google_id),
+            google_url=archivo_info.get("url") or _extract_first_url(result.get("texto") or result.get("output")),
+            title=archivo_info.get("titulo") or fallback_title,
+        )
+    ]
+
+
+def _coerce_artifact_specs(args: dict) -> list[dict]:
+    raw_files = args.get("files")
+    if isinstance(raw_files, str):
+        try:
+            raw_files = json.loads(raw_files)
+        except Exception:
+            raw_files = None
+
+    if not raw_files:
+        return [dict(args)]
+
+    if not isinstance(raw_files, list):
+        raw_files = [raw_files]
+
+    specs: list[dict] = []
+    for raw_spec in raw_files:
+        if isinstance(raw_spec, dict):
+            spec = dict(raw_spec)
+        else:
+            spec = {"filename": raw_spec}
+        for shared_key in ("artifact_type", "extension", "subdir"):
+            if shared_key not in spec and args.get(shared_key) is not None:
+                spec[shared_key] = args.get(shared_key)
+        specs.append(spec)
+    return specs
+
+
+def _extract_artifact_content(spec: dict) -> str:
+    content = spec.get("content")
+    if content is None:
+        for key in ("code", "html", "css", "javascript", "python", "php", "text"):
+            if spec.get(key) is not None:
+                content = spec.get(key)
+                break
+    if isinstance(content, (dict, list)):
+        content = json.dumps(content, ensure_ascii=False, indent=2)
+    return str(content or "")
+
+
+def _coerce_open_paths(args: dict) -> list[Path]:
+    raw_paths: list[Any] = []
+
+    if args.get("path"):
+        raw_paths.append(args.get("path"))
+
+    paths_arg = args.get("paths")
+    if isinstance(paths_arg, str):
+        try:
+            paths_arg = json.loads(paths_arg)
+        except Exception:
+            paths_arg = [paths_arg]
+    if isinstance(paths_arg, list):
+        raw_paths.extend(paths_arg)
+
+    artifacts_arg = args.get("artifacts")
+    if isinstance(artifacts_arg, str):
+        try:
+            artifacts_arg = json.loads(artifacts_arg)
+        except Exception:
+            artifacts_arg = []
+    if isinstance(artifacts_arg, list):
+        for artifact in artifacts_arg:
+            if isinstance(artifact, dict) and artifact.get("path"):
+                raw_paths.append(artifact["path"])
+
+    resolved_paths: list[Path] = []
+    seen_paths: set[str] = set()
+    for raw_path in raw_paths:
+        if not raw_path:
+            continue
+        resolved = Path(str(raw_path)).resolve()
+        output_root = OUTPUT_DIR.resolve()
+        if not str(resolved).startswith(str(output_root)):
+            raise ValueError(f"Solo se permite abrir archivos bajo {OUTPUT_DIR}")
+        if not resolved.exists() or not resolved.is_file():
+            raise ValueError(f"Archivo no encontrado: {resolved}")
+        key = str(resolved)
+        if key not in seen_paths:
+            resolved_paths.append(resolved)
+            seen_paths.add(key)
+    return resolved_paths
+
+
+def _open_with_default_app(path: Path):
+    if hasattr(os, "startfile"):
+        os.startfile(str(path))  # type: ignore[attr-defined]
+        return
+    command = ["open", str(path)] if os.name == "posix" and sys.platform == "darwin" else ["xdg-open", str(path)]
+    subprocess.Popen(command)
+
+
+class MessageToolAdapter(ToolAdapter):
+    """Envuelve una capacidad basada en una instrucción en lenguaje natural."""
+
+    def __init__(self, name: str, description: str, handler: Callable[[str], Any]):
+        self.name = name
+        self.description = description
+        self.handler = handler
+
+    def execute(self, args: dict) -> dict:
+        message = str(
+            args.get("message")
+            or args.get("query")
+            or args.get("prompt")
+            or ""
+        ).strip()
+        if not message:
+            return {
+                "success": False,
+                "output": None,
+                "error": "Falta el argumento 'message'.",
+            }
+        try:
+            result = self.handler(message)
+            success, output = _normalize_output(result)
+            return {
+                "success": success,
+                "output": output,
+                "error": None if success else output,
+                "artifacts": _local_artifacts_from_result(result),
+            }
+        except Exception as e:
+            return {"success": False, "output": None, "error": str(e)}
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -147,6 +580,164 @@ class WriteFileAdapter(ToolAdapter):
             return {"success": False, "output": None, "error": str(e)}
 
 
+class CreateNotebookAdapter(ToolAdapter):
+    """Crea notebooks Jupyter válidos bajo output/notebooks."""
+
+    name = "create_notebook"
+    description = (
+        "Create a local Jupyter notebook (.ipynb) under output/notebooks. "
+        "Args: optional 'title', optional 'filename', optional 'language', and 'cells' "
+        "(list of {'type': 'markdown'|'code', 'content': str})."
+    )
+    requires_approval = False
+
+    def execute(self, args: dict) -> dict:
+        title = str(args.get("title") or args.get("tema") or "Notebook").strip() or "Notebook"
+        filename = args.get("filename") or args.get("path") or f"{title}.ipynb"
+        language = str(args.get("language") or "python").strip() or "python"
+        cells = _coerce_notebook_cells(args)
+        if not cells:
+            return {
+                "success": False,
+                "output": None,
+                "error": "Falta el contenido del notebook en 'cells' o 'content'.",
+            }
+
+        safe_name = _sanitize_filename(filename, default_stem="notebook", default_suffix=".ipynb")
+        safe_name = str(Path(safe_name).with_suffix(".ipynb"))
+        try:
+            output_path = _unique_output_path(_NOTEBOOK_OUTPUT_DIR, safe_name)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            notebook = {
+                "cells": cells,
+                "metadata": _build_notebook_metadata(language),
+                "nbformat": 4,
+                "nbformat_minor": 5,
+            }
+            output_path.write_text(json.dumps(notebook, ensure_ascii=False, indent=2), encoding="utf-8")
+            artifacts = [_artifact_descriptor(output_path, artifact_type="notebook", title=title)]
+            return {
+                "success": True,
+                "output": f"Notebook creado correctamente en: {output_path}",
+                "error": None,
+                "path": str(output_path),
+                "filename": output_path.name,
+                "artifacts": artifacts,
+            }
+        except Exception as e:
+            return {"success": False, "output": None, "error": str(e)}
+
+
+class CreateLocalArtifactAdapter(ToolAdapter):
+    """Crea archivos de texto locales bajo output/files."""
+
+    name = "create_local_artifact"
+    description = (
+        "Create a local text artifact under output/files. Supported extensions: "
+        ".html, .css, .js, .ts, .py, .php, .json, .md, .txt, .xml, .yaml, .yml, .sql, .csv. "
+        "Args: single-file mode with 'filename' or multi-file mode with 'files' (list of file specs), "
+        "plus optional 'artifact_type', optional 'subdir', and 'content'."
+    )
+    requires_approval = False
+
+    def execute(self, args: dict) -> dict:
+        try:
+            artifact_specs = _coerce_artifact_specs(args)
+            artifacts: list[dict] = []
+            created_paths: list[Path] = []
+
+            for spec in artifact_specs:
+                filename = spec.get("filename") or spec.get("path") or spec.get("title") or "artifact"
+                artifact_type = spec.get("artifact_type") or spec.get("extension")
+                extension = _normalize_artifact_extension(filename, artifact_type)
+                if extension not in _ALLOWED_ARTIFACT_EXTENSIONS:
+                    return {
+                        "success": False,
+                        "output": None,
+                        "error": f"Extensión no soportada: {extension}",
+                    }
+
+                content = _extract_artifact_content(spec)
+                if not content.strip():
+                    return {
+                        "success": False,
+                        "output": None,
+                        "error": "Falta el contenido del archivo en 'content'.",
+                    }
+
+                safe_name = _sanitize_filename(filename, default_stem="artifact", default_suffix=extension)
+                safe_name = str(Path(safe_name).with_suffix(extension))
+                safe_subdir = _sanitize_subdir(spec.get("subdir"))
+                target_dir = _ARTIFACT_OUTPUT_DIR / safe_subdir
+                output_path = _unique_output_path(target_dir, safe_name)
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                output_path.write_text(content, encoding="utf-8")
+                created_paths.append(output_path)
+                artifacts.append(
+                    _artifact_descriptor(
+                        output_path,
+                        artifact_type=extension.lstrip("."),
+                        title=spec.get("title") or Path(safe_name).stem,
+                    )
+                )
+
+            first_path = created_paths[0]
+            output_lines = ["Archivos creados correctamente:"]
+            output_lines.extend(f"- {path}" for path in created_paths)
+            return {
+                "success": True,
+                "output": "\n".join(output_lines),
+                "error": None,
+                "path": str(first_path),
+                "filename": first_path.name,
+                "paths": [str(path) for path in created_paths],
+                "artifacts": artifacts,
+            }
+        except Exception as e:
+            return {"success": False, "output": None, "error": str(e)}
+
+
+class OpenLocalArtifactAdapter(ToolAdapter):
+    """Abre uno o varios archivos locales creados por el agente."""
+
+    name = "open_local_artifact"
+    description = (
+        "Open one or more local artifacts under output/. Accepts 'path', 'paths', or 'artifacts'. "
+        "Use only on local desktop channels when the user explicitly asks to open the generated file."
+    )
+    requires_approval = False
+
+    def execute(self, args: dict) -> dict:
+        try:
+            paths = _coerce_open_paths(args)
+        except Exception as e:
+            return {"success": False, "output": None, "error": str(e)}
+
+        if not paths:
+            return {
+                "success": False,
+                "output": None,
+                "error": "Falta 'path', 'paths' o 'artifacts' para abrir el archivo.",
+            }
+
+        opened: list[Path] = []
+        for path in paths:
+            _open_with_default_app(path)
+            opened.append(path)
+
+        artifacts = [_artifact_descriptor(path, artifact_type=path.suffix.lstrip(".") or "file") for path in opened]
+        output_lines = ["Archivos abiertos correctamente:"]
+        output_lines.extend(f"- {path}" for path in opened)
+        return {
+            "success": True,
+            "output": "\n".join(output_lines),
+            "error": None,
+            "path": str(opened[0]),
+            "paths": [str(path) for path in opened],
+            "artifacts": artifacts,
+        }
+
+
 class RunShellAdapter(ToolAdapter):
     """Ejecuta un comando de shell. Requiere aprobación siempre."""
 
@@ -203,14 +794,14 @@ class CreatePresentationAdapter(ToolAdapter):
     """Crea una presentación en Google Slides."""
 
     name = "create_presentation"
-    description = "Create a Google Slides presentation on a given topic."
+    description = "Create a Google Slides presentation. Args: 'tema' (required) and optional 'detalles'."
     requires_approval = False
 
     def __init__(self, gestor):
         self.gestor = gestor
 
     def execute(self, args: dict) -> dict:
-        tema = args.get("tema", "")
+        tema = args.get("tema") or args.get("topic") or args.get("title") or ""
         detalles = args.get("detalles", {})
         if not tema:
             return {"success": False, "output": None, "error": "Falta el argumento 'tema'."}
@@ -219,7 +810,12 @@ class CreatePresentationAdapter(ToolAdapter):
         try:
             res = self.gestor.crear_presentacion(tema, detalles)
             texto = res.get("texto", "")
-            return {"success": "❌" not in texto, "output": texto, "error": None}
+            return {
+                "success": "❌" not in texto,
+                "output": texto,
+                "error": None,
+                "artifacts": _google_artifacts_from_result(res, fallback_title=f"{tema} - Presentacion"),
+            }
         except Exception as e:
             return {"success": False, "output": None, "error": str(e)}
 
@@ -228,23 +824,46 @@ class CreateDocumentAdapter(ToolAdapter):
     """Crea un documento en Google Docs."""
 
     name = "create_document"
-    description = "Create a Google Docs document on a given topic."
+    description = "Create a Google Docs document. Args: 'tema' (required), optional 'detalles', optional 'content'."
     requires_approval = False
 
     def __init__(self, gestor):
         self.gestor = gestor
 
     def execute(self, args: dict) -> dict:
-        tema = args.get("tema", "")
+        tema = args.get("tema") or args.get("topic") or args.get("title") or ""
         detalles = args.get("detalles", {})
+        contenido = args.get("content", "")
         if not tema:
             return {"success": False, "output": None, "error": "Falta el argumento 'tema'."}
         if not self.gestor.google:
             return {"success": False, "output": None, "error": "Google Docs no configurado."}
         try:
+            if contenido:
+                doc = self.gestor.google.crear_documento(f"{tema} - Documento", contenido)
+                if doc:
+                    return {
+                        "success": True,
+                        "output": f"✅ Documento creado\n\n🔗 **URL**: {doc['url']}",
+                        "error": None,
+                        "artifacts": [
+                            _google_workspace_artifact(
+                                artifact_type="documento",
+                                google_id=str(doc["id"]),
+                                google_url=doc.get("url"),
+                                title=doc.get("titulo") or f"{tema} - Documento",
+                            )
+                        ],
+                    }
+                return {"success": False, "output": None, "error": "Error al crear documento"}
             res = self.gestor.crear_documento(tema, detalles)
             texto = res.get("texto", "")
-            return {"success": "❌" not in texto, "output": texto, "error": None}
+            return {
+                "success": "❌" not in texto,
+                "output": texto,
+                "error": None,
+                "artifacts": _google_artifacts_from_result(res, fallback_title=f"{tema} - Documento"),
+            }
         except Exception as e:
             return {"success": False, "output": None, "error": str(e)}
 
@@ -253,14 +872,14 @@ class CreateSpreadsheetAdapter(ToolAdapter):
     """Crea una hoja de cálculo en Google Sheets."""
 
     name = "create_spreadsheet"
-    description = "Create a Google Sheets spreadsheet."
+    description = "Create a Google Sheets spreadsheet. Args: 'tema' (required) and optional 'detalles'."
     requires_approval = False
 
     def __init__(self, gestor):
         self.gestor = gestor
 
     def execute(self, args: dict) -> dict:
-        tema = args.get("tema", "")
+        tema = args.get("tema") or args.get("topic") or args.get("title") or ""
         detalles = args.get("detalles", {})
         if not tema:
             return {"success": False, "output": None, "error": "Falta el argumento 'tema'."}
@@ -269,7 +888,12 @@ class CreateSpreadsheetAdapter(ToolAdapter):
         try:
             res = self.gestor.crear_hoja_calculo(tema, detalles)
             texto = res.get("texto", "")
-            return {"success": "❌" not in texto, "output": texto, "error": None}
+            return {
+                "success": "❌" not in texto,
+                "output": texto,
+                "error": None,
+                "artifacts": _google_artifacts_from_result(res, fallback_title=f"{tema} - Datos"),
+            }
         except Exception as e:
             return {"success": False, "output": None, "error": str(e)}
 
@@ -326,6 +950,135 @@ class AnalyzeDocumentAdapter(ToolAdapter):
             return {"success": False, "output": None, "error": "No se pudo procesar el documento."}
         except Exception as e:
             return {"success": False, "output": None, "error": str(e)}
+
+
+# ═══════════════════════════════════════════════════════════════
+# DeepFace — Reconocimiento y análisis facial
+# ═══════════════════════════════════════════════════════════════
+
+class FaceAnalyzeAdapter(ToolAdapter):
+    """Analiza atributos faciales: edad, género, emoción, raza."""
+
+    name = "face_analyze"
+    description = (
+        "Analyze facial attributes (age, gender, emotion, race) in an image. "
+        "Args: 'path' (local file) or 'base64' (image data), "
+        "'actions' (optional list: 'age','gender','emotion','race' — default: all)."
+    )
+    requires_approval = False
+
+    def __init__(self, face_manager):
+        self.fm = face_manager
+
+    def execute(self, args: dict) -> dict:
+        from core.face_recognition import FaceManager
+        path = args.get("path", "")
+        b64 = args.get("base64", "")
+        actions = args.get("actions")
+        if isinstance(actions, str):
+            actions = [a.strip() for a in actions.split(",")]
+        result = self.fm.analyze(path=path, b64=b64, actions=actions)
+        if result["success"]:
+            result["output_text"] = FaceManager.format_analysis(result)
+        return result
+
+
+class FaceVerifyAdapter(ToolAdapter):
+    """Verifica si dos imágenes son la misma persona."""
+
+    name = "face_verify"
+    description = (
+        "Verify whether two facial images belong to the same person. "
+        "Args: 'img1_path'/'img1_base64' and 'img2_path'/'img2_base64'."
+    )
+    requires_approval = False
+
+    def __init__(self, face_manager):
+        self.fm = face_manager
+
+    def execute(self, args: dict) -> dict:
+        from core.face_recognition import FaceManager
+        result = self.fm.verify(
+            img1_path=args.get("img1_path", ""),
+            img2_path=args.get("img2_path", ""),
+            img1_base64=args.get("img1_base64", ""),
+            img2_base64=args.get("img2_base64", ""),
+        )
+        if result["success"]:
+            result["output_text"] = FaceManager.format_verify(result)
+        return result
+
+
+class FaceRegisterAdapter(ToolAdapter):
+    """Registra un rostro en la base de datos de reconocimiento facial."""
+
+    name = "face_register"
+    description = (
+        "Register a face in the facial recognition database. "
+        "Args: 'name' (person's name, REQUIRED), 'path' (local file) or 'base64' (image data)."
+    )
+    requires_approval = True  # Dato biométrico — requiere aprobación
+
+    def __init__(self, face_manager):
+        self.fm = face_manager
+
+    def execute(self, args: dict) -> dict:
+        return self.fm.register_face(
+            name=args.get("name", ""),
+            path=args.get("path", ""),
+            b64=args.get("base64", ""),
+        )
+
+
+class FaceRecognizeAdapter(ToolAdapter):
+    """Identifica una persona buscando en la BD de rostros conocidos."""
+
+    name = "face_recognize"
+    description = (
+        "Identify a person by searching the registered faces database. "
+        "Args: 'path' (local file) or 'base64' (image data)."
+    )
+    requires_approval = False
+
+    def __init__(self, face_manager):
+        self.fm = face_manager
+
+    def execute(self, args: dict) -> dict:
+        from core.face_recognition import FaceManager
+        result = self.fm.recognize(
+            path=args.get("path", ""),
+            b64=args.get("base64", ""),
+        )
+        if result["success"]:
+            result["output_text"] = FaceManager.format_recognize(result)
+        return result
+
+
+class FaceAntiSpoofAdapter(ToolAdapter):
+    """Detecta si una imagen facial es real o falsificada (anti-spoofing)."""
+
+    name = "face_antispoofing"
+    description = (
+        "Detect whether a facial image is real or a spoof (photo of photo, screen, etc.). "
+        "Args: 'path' (local file) or 'base64' (image data)."
+    )
+    requires_approval = False
+
+    def __init__(self, face_manager):
+        self.fm = face_manager
+
+    def execute(self, args: dict) -> dict:
+        result = self.fm.check_spoofing(
+            path=args.get("path", ""),
+            b64=args.get("base64", ""),
+        )
+        if result["success"]:
+            lines = []
+            for r in result["output"]:
+                status = "✅ Real" if r["es_real"] else "⚠️ Posible falsificación"
+                lines.append(f"{status} (confianza: {r['confianza_antispoof']:.2%})")
+            result["output_text"] = "\n".join(lines)
+        return result
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -853,7 +1606,7 @@ class AdapterRegistry:
         return adapter.requires_approval if adapter else True  # unknown → require approval
 
 
-def build_registry(gestor, knowledge_base=None, spotify_client=None) -> AdapterRegistry:
+def build_registry(gestor, knowledge_base=None, spotify_client=None, face_manager=None) -> AdapterRegistry:
     """
     Construye el registry con todos los adapters disponibles,
     reutilizando los componentes que ya tiene GestorHerramientas.
@@ -863,6 +1616,9 @@ def build_registry(gestor, knowledge_base=None, spotify_client=None) -> AdapterR
     registry.register(SearchWebAdapter(gestor.scraper, gestor._consultar_ia))
     registry.register(CallApiAdapter(gestor._consultar_ia))
     registry.register(ReadFileAdapter())
+    registry.register(CreateNotebookAdapter())
+    registry.register(CreateLocalArtifactAdapter())
+    registry.register(OpenLocalArtifactAdapter())
     registry.register(WriteFileAdapter())
     registry.register(RunShellAdapter())
     registry.register(CreatePresentationAdapter(gestor))
@@ -871,6 +1627,59 @@ def build_registry(gestor, knowledge_base=None, spotify_client=None) -> AdapterR
     registry.register(AnalyzeImageAdapter(gestor.vision))
     registry.register(AnalyzeDocumentAdapter(gestor.docs))
     registry.register(EvaluateCVAdapter(gestor._consultar_ia, knowledge_base=knowledge_base))
+    registry.register(MessageToolAdapter(
+        "calendar_manage",
+        "Create or read Google Calendar events from a natural-language instruction. Args: 'message'.",
+        gestor.gestionar_calendario,
+    ))
+    registry.register(MessageToolAdapter(
+        "gmail_manage",
+        "Read or send Gmail messages from a natural-language instruction. Args: 'message'.",
+        gestor.gestionar_correo,
+    ))
+    registry.register(MessageToolAdapter(
+        "youtube_search",
+        "Search YouTube and recommend videos from a natural-language request. Args: 'message'.",
+        gestor.gestionar_youtube,
+    ))
+    registry.register(MessageToolAdapter(
+        "weather_lookup",
+        "Get current weather for a city from a natural-language request. Args: 'message'.",
+        gestor.gestionar_clima,
+    ))
+    registry.register(MessageToolAdapter(
+        "crypto_lookup",
+        "Get cryptocurrency prices or rankings from a natural-language request. Args: 'message'.",
+        gestor.gestionar_crypto,
+    ))
+    registry.register(MessageToolAdapter(
+        "image_generate",
+        "Generate an image with Pollinations.ai from a natural-language prompt. Args: 'message'.",
+        gestor.generar_imagen_ia,
+    ))
+    registry.register(MessageToolAdapter(
+        "qr_generate",
+        "Generate a QR code from a natural-language request. Args: 'message'.",
+        gestor.generar_qr,
+    ))
+    registry.register(MessageToolAdapter(
+        "nasa_lookup",
+        "Get NASA picture of the day or asteroid information from a natural-language request. Args: 'message'.",
+        gestor.gestionar_nasa,
+    ))
+    registry.register(MessageToolAdapter(
+        "comfyui_generate",
+        "Generate an image with local ComfyUI or Stable Diffusion from a natural-language prompt. Args: 'message'.",
+        gestor.generar_imagen_comfyui,
+    ))
+
+    # DeepFace adapters (solo si hay face_manager)
+    if face_manager and face_manager.available:
+        registry.register(FaceAnalyzeAdapter(face_manager))
+        registry.register(FaceVerifyAdapter(face_manager))
+        registry.register(FaceRegisterAdapter(face_manager))
+        registry.register(FaceRecognizeAdapter(face_manager))
+        registry.register(FaceAntiSpoofAdapter(face_manager))
 
     # Knowledge base adapters (solo si hay KB)
     if knowledge_base:

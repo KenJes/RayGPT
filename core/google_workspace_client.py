@@ -48,6 +48,8 @@ class GoogleWorkspaceClient:
         'https://www.googleapis.com/auth/presentations',
         'https://www.googleapis.com/auth/calendar',
         'https://www.googleapis.com/auth/youtube.readonly',
+        'https://www.googleapis.com/auth/gmail.readonly',
+        'https://www.googleapis.com/auth/gmail.send',
     ]
     
     def __init__(self, service_account_file):
@@ -64,6 +66,7 @@ class GoogleWorkspaceClient:
         self.calendar_service = None
         self.slides_service = None
         self.youtube_service = None
+        self.gmail_service = None
         self.auth_type = None
         self.pexels_api_key = os.environ.get('PEXELS_API_KEY')
         
@@ -122,12 +125,34 @@ class GoogleWorkspaceClient:
             self.sheets_service = build('sheets', 'v4', credentials=self.credentials)
             self.slides_service = build('slides', 'v1', credentials=self.credentials)
             self.calendar_service = build('calendar', 'v3', credentials=self.credentials)
-            self.youtube_service = build('youtube', 'v3', credentials=self.credentials)
-            
-            print("✅ Google Workspace y YouTube conectados correctamente")
-            
+            print("✅ Google Workspace conectado correctamente")
         except Exception as e:
             print(f"❌ Error al inicializar servicios de Google: {e}")
+
+        # Gmail (solo disponible con OAuth, no con Service Account)
+        if self.auth_type == 'oauth' and self.credentials:
+            try:
+                self.gmail_service = build('gmail', 'v1', credentials=self.credentials)
+                print("✅ Gmail conectado")
+            except Exception as e:
+                print(f"⚠️ Gmail no disponible: {e}")
+
+        # YouTube: usar API Key si está disponible (más confiable que Service Account)
+        youtube_api_key = os.environ.get('YOUTUBE_API_KEY', '')
+        if youtube_api_key:
+            try:
+                self.youtube_service = build('youtube', 'v3', developerKey=youtube_api_key)
+                print("✅ YouTube conectado con API Key")
+            except Exception as e:
+                print(f"⚠️ Error YouTube API Key: {e}")
+        elif self.credentials:
+            try:
+                self.youtube_service = build('youtube', 'v3', credentials=self.credentials)
+                print("✅ YouTube conectado con credenciales de cuenta (puede fallar en cuentas personales)")
+            except Exception as e:
+                print(f"⚠️ YouTube no disponible con credenciales actuales: {e}")
+        else:
+            print("⚠️ YouTube no disponible — agrega YOUTUBE_API_KEY en config/.env")
     
     def is_available(self):
         """Verifica si el cliente está disponible"""
@@ -457,7 +482,90 @@ class GoogleWorkspaceClient:
         except HttpError as e:
             print(f"❌ Error al listar eventos: {e}")
             return []
-    
+
+    # ─────────────────────────────────────────────────────────
+    # Gmail
+    # ─────────────────────────────────────────────────────────
+
+    def listar_correos_recientes(self, max_results=5, solo_no_leidos=False):
+        """
+        Lista los correos recientes de Gmail (INBOX).
+
+        Returns:
+            list[dict]: Cada dict tiene keys: id, asunto, de, fecha, fragmento
+        """
+        if not self.gmail_service:
+            return None  # None = Gmail no disponible (≠ lista vacía)
+
+        try:
+            query = "in:inbox"
+            if solo_no_leidos:
+                query += " is:unread"
+
+            result = self.gmail_service.users().messages().list(
+                userId="me",
+                q=query,
+                maxResults=max_results,
+            ).execute()
+
+            msg_ids = [m["id"] for m in result.get("messages", [])]
+            if not msg_ids:
+                return []
+
+            correos = []
+            for msg_id in msg_ids:
+                msg = self.gmail_service.users().messages().get(
+                    userId="me",
+                    id=msg_id,
+                    format="metadata",
+                    metadataHeaders=["Subject", "From", "Date"],
+                ).execute()
+
+                headers = {h["name"]: h["value"] for h in msg.get("payload", {}).get("headers", [])}
+                correos.append({
+                    "id": msg_id,
+                    "asunto": headers.get("Subject", "(sin asunto)"),
+                    "de": headers.get("From", "(desconocido)"),
+                    "fecha": headers.get("Date", ""),
+                    "fragmento": msg.get("snippet", ""),
+                    "no_leido": "UNREAD" in msg.get("labelIds", []),
+                })
+            return correos
+
+        except HttpError as e:
+            print(f"❌ Error listando correos: {e}")
+            return []
+
+    def enviar_correo(self, destinatario: str, asunto: str, cuerpo: str) -> bool:
+        """
+        Envía un correo desde la cuenta OAuth autenticada.
+
+        Returns:
+            bool: True si se envió, False si hubo error
+        """
+        if not self.gmail_service:
+            return False
+
+        try:
+            import base64
+            from email.mime.text import MIMEText
+
+            msg = MIMEText(cuerpo, "plain", "utf-8")
+            msg["To"] = destinatario
+            msg["Subject"] = asunto
+
+            raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+            self.gmail_service.users().messages().send(
+                userId="me",
+                body={"raw": raw},
+            ).execute()
+            print(f"✅ Correo enviado a {destinatario}: {asunto}")
+            return True
+
+        except HttpError as e:
+            print(f"❌ Error enviando correo: {e}")
+            return False
+
     def exportar_presentacion_pptx(self, presentation_id, output_path):
         """
         Exporta una presentación de Google Slides a formato PPTX
@@ -474,7 +582,7 @@ class GoogleWorkspaceClient:
         
         try:
             from googleapiclient.http import MediaIoBaseDownload
-            import io
+
             
             # Exportar presentación como PPTX
             request = self.drive_service.files().export_media(
@@ -519,7 +627,7 @@ class GoogleWorkspaceClient:
         
         try:
             from googleapiclient.http import MediaIoBaseDownload
-            import io
+
             
             request = self.drive_service.files().export_media(
                 fileId=document_id,
@@ -561,7 +669,7 @@ class GoogleWorkspaceClient:
         
         try:
             from googleapiclient.http import MediaIoBaseDownload
-            import io
+
             
             request = self.drive_service.files().export_media(
                 fileId=spreadsheet_id,

@@ -132,6 +132,13 @@ class VoiceAssistant:
         self._muted = False
         self._trigger_event = threading.Event()
         self._stop_recording = threading.Event()
+        self._busy = False               # True mientras escucha/procesa/habla
+        self.speaking_lock = threading.Lock()  # Lock compartido con DeepFaceCommentator
+
+    @property
+    def is_busy(self) -> bool:
+        """True si el asistente está escuchando, procesando o hablando."""
+        return self._busy
 
     # ─── Control ──────────────────────────────────────────────
 
@@ -199,6 +206,8 @@ class VoiceAssistant:
                 self._trigger_event.clear()
                 self._stop_recording.clear()
 
+                self._busy = True  # ← ocupado desde que empieza a escuchar
+
                 # 2. Escuchar (animación LISTENING)
                 logger.info("👂 Escuchando...")
                 self.on_listen()
@@ -209,6 +218,7 @@ class VoiceAssistant:
 
                 if not command or len(command) < 2:
                     self._speak("¿Sí? No te escuché. Inténtalo de nuevo.")
+                    self._busy = False
                     self.on_idle()
                     continue
 
@@ -230,13 +240,16 @@ class VoiceAssistant:
                 # 4. Responder con voz
                 logger.info(f"🗣️ Respuesta: '{response[:80]}...'")
                 self.on_speak()
-                self._speak(response)
+                with self.speaking_lock:
+                    self._speak(response)
+                self._busy = False
                 self.on_idle()
 
             except KeyboardInterrupt:
                 break
             except Exception as e:
                 logger.error(f"❌ Error en voice loop: {e}")
+                self._busy = False
                 self.on_idle()
                 time.sleep(1)
 
@@ -400,6 +413,8 @@ def _run_standalone():
 
     from dotenv import load_dotenv
     load_dotenv(_ROOT / ".env")
+    os.environ.pop("GITHUB_TOKEN", None)
+    os.environ.pop("GH_TOKEN", None)
 
     # Configurar logging
     logging.basicConfig(
@@ -414,23 +429,43 @@ def _run_standalone():
 
     # ── Inicializar cerebro ───────────────────────────────────
     from core.config import config_agente, AppConfig
-    from core.ai_clients import OllamaClient, MistralClient, GroqClient
+    from core.ai_clients import (
+        OllamaClient,
+        MistralClient,
+        GroqClient,
+        GitHubCopilotClient,
+        make_ai_chat_fn,
+    )
     from core.tools import GestorHerramientas
     from core.audio_handler import get_audio_handler
     from core.adapters import build_registry
-    from core.agent_loop import AgentLoop, es_meta_compleja
+    from core.agent_loop import AgentLoop
     from core.agent_logger import AgentLogger
     from core.agent_memory import VectorMemory
+    from core.agent_runtime import AgentRuntime, AgentRequest
     from core.knowledge_db import KnowledgeBase
     from core.spotify_client import SpotifyClient
-    from core.conversation_db import agregar_mensaje, get_contexto_completo
+    from core.conversation_db import ConversationDB, clear_user
+    from core.context_manager import ContextManager
 
     cfg = AppConfig()
     ollama = OllamaClient(cfg.ollama_url, cfg.ollama_model)
     mistral = MistralClient(cfg.mistral_api_key)
     groq = GroqClient()
-    gestor = GestorHerramientas(ollama, mistral, google=cfg.google_client, groq=groq)
+    copilot = GitHubCopilotClient()
+    gestor = GestorHerramientas(
+        ollama,
+        mistral,
+        google=cfg.google_client,
+        groq=groq,
+        copilot=copilot,
+    )
     knowledge_base = KnowledgeBase()
+    conversation_db = ConversationDB()
+    context_manager = ContextManager(
+        knowledge_base=knowledge_base,
+        memory_system=gestor.memory,
+    )
 
     # Spotify
     spotify_client = None
@@ -451,29 +486,27 @@ def _run_standalone():
     agent_logger = AgentLogger()
     agent_memory = VectorMemory()
 
-    def _ai_chat(messages, temperature=0.4, max_tokens=2000):
-        from core.tools import es_rechazo_llm
-        # 1. Ollama local (gratis, ilimitado)
-        r = ollama.chat(messages, temperature=temperature, max_tokens=max_tokens)
-        if r and not es_rechazo_llm(r):
-            return r
-        # 2. Groq (rate limited)
-        if groq and groq.client:
-            r = groq.chat(messages, temperature=temperature, max_tokens=max_tokens)
-            if r and not es_rechazo_llm(r):
-                return r
-        # 3. Mistral
-        if mistral and mistral.client:
-            r = mistral.chat(messages, temperature=temperature, max_tokens=max_tokens)
-            if r and not es_rechazo_llm(r):
-                return r
-        return ""
+    _ai_chat = make_ai_chat_fn(
+        groq_client=groq,
+        mistral_client=mistral,
+        ollama_client=ollama,
+        copilot_client=copilot,
+        compress=False,
+        filter_rejections=False,
+    )
 
     agent_loop = AgentLoop(
         registry=registry,
         ai_chat_fn=_ai_chat,
         logger=agent_logger,
         memory=agent_memory,
+    )
+    agent_runtime = AgentRuntime(
+        gestor=gestor,
+        agent_loop=agent_loop,
+        conversation_db=conversation_db,
+        knowledge_base=knowledge_base,
+        context_manager=context_manager,
     )
 
     # Audio handler — arranca con voz masculina (Jorge = Raymundo)
@@ -516,93 +549,36 @@ def _run_standalone():
                 gui.set_persona('raymundo')
                 return "Qué onda, ahora soy Raymundo. Di 'Raymundo' para hablarme."
 
-        # Guardar en historial
-        agregar_mensaje(user_id, "user", command)
-
-        # 1. Spotify: comandos rápidos
-        if spotify_client and spotify_client.is_authenticated:
-            intent, query = detect_spotify_intent(command.lower().strip())
-            if intent:
-                try:
-                    if intent == "pause":
-                        result = spotify_client.pause()
-                    elif intent == "play" and query:
-                        result = spotify_client.play(query)
-                    elif intent == "play":
-                        result = spotify_client.play()
-                    elif intent == "next":
-                        result = spotify_client.next_track()
-                    elif intent == "previous":
-                        result = spotify_client.previous_track()
-                    elif intent == "current":
-                        result = spotify_client.current_track()
-                    else:
-                        result = None
-                    if result:
-                        agregar_mensaje(user_id, "assistant", result)
-                        return result
-                except Exception as e:
-                    return f"Error Spotify: {e}"
-
-        # 2. Herramientas: calendario, YouTube, presentaciones, docs, web, etc.
-        resultado_herramienta = gestor.procesar_mensaje(
-            command, user_name="Kenneth", user_id=user_id,
-        )
-        if resultado_herramienta.get("ejecuto_herramienta"):
-            response = resultado_herramienta["resultado"]
-            # /reset: limpiar SQLite BD + vocabulario/temas + VectorMemory
-            if resultado_herramienta.get("tipo") == "reset":
-                from core.conversation_db import clear_user
-                clear_user(user_id)
-                try:
-                    gestor.memory.clear_user_context(user_id)
-                except Exception:
-                    pass
-                try:
-                    agent_memory.clear()
-                except Exception:
-                    pass
-                from core.config import _get_mode
-                if _get_mode() == "rai":
-                    response = "ya wey, borre toda la conversacion. ahora si, q chingados kieres?"
-                else:
-                    response = "🗑️ Listo, borré el historial. Empezamos de cero."
-            else:
-                agregar_mensaje(user_id, "assistant", response)
-            return response
-
-        # 3. Meta compleja → AgentLoop
-        if es_meta_compleja(command):
+        if command.lower() in ("/reset", "/borrar", "/limpiar", "/nuevo", "/clear"):
+            clear_user(user_id)
             try:
-                kb_context = knowledge_base.build_knowledge_context(query=command)
-                conv_context = get_contexto_completo(user_id)
-                result = agent_loop.run(
-                    goal=command,
-                    knowledge_context=kb_context,
-                    conversation_context=conv_context,
-                )
-                response = result.get("response", "No obtuve respuesta del agente")
-            except Exception as e:
-                response = f"Error del agente: {e}"
-        else:
-            # 4. Chat híbrido (fallback)
+                gestor.memory.clear_user_context(user_id)
+            except Exception:
+                pass
             try:
-                kb_context = knowledge_base.build_knowledge_context(query=command)
-                conv_context = get_contexto_completo(user_id)
-                response = gestor.chat_hibrido(
-                    command,
-                    user_name="Kenneth",
+                agent_memory.clear()
+            except Exception:
+                pass
+            from core.config import _get_mode
+            if _get_mode() == "rai":
+                return "ya wey, borre toda la conversacion. ahora si, q chingados kieres?"
+            return "🗑️ Listo, borré el historial. Empezamos de cero."
+
+        try:
+            runtime_response = agent_runtime.handle_text(
+                AgentRequest(
+                    text=command,
                     user_id=user_id,
-                    history=conv_context,
-                    knowledge_context=kb_context,
+                    user_name="Kenneth",
+                    channel="voice",
+                    tono_override=config_agente.get_tono(),
                 )
-                if not response:
-                    response = "No pude generar una respuesta"
-            except Exception as e:
-                response = f"Error: {e}"
-
-        agregar_mensaje(user_id, "assistant", response)
-        return response
+            )
+            if runtime_response.response:
+                return runtime_response.response
+            return "No pude generar una respuesta"
+        except Exception as e:
+            return f"Error: {e}"
 
     # ── Callbacks → GUI ───────────────────────────────────────
     def on_wake():
@@ -637,10 +613,59 @@ def _run_standalone():
     )
     # Conectar clic del orbe al asistente
     gui._on_orb_click = assistant.trigger
+
+    # ── DeepFace Vision (cámara en tiempo real) ───────────────
+    deepface_stream = None
+    deepface_commentator = None
+    _enable_vision = "--vision" in sys.argv or os.environ.get("RAYMUNDO_VISION", "").strip() == "1"
+
+    if _enable_vision:
+        try:
+            from core.deepface_stream import DeepFaceStream, DeepFaceCommentator
+
+            deepface_stream = DeepFaceStream(
+                camera_index=0,
+                analyze_interval=2.0,
+            )
+            if deepface_stream.available:
+                result = deepface_stream.start()
+                if result.get("success"):
+                    # Cargar personalidad para el system prompt del comentarista
+                    _personality = config_agente.get_prompt_sistema() or ""
+
+                    deepface_commentator = DeepFaceCommentator(
+                        ai_chat_fn=_ai_chat,
+                        tts_fn=audio.text_to_speech,
+                        play_fn=audio.play_audio,
+                        stream=deepface_stream,
+                        speaking_lock=assistant.speaking_lock,
+                        is_busy_fn=lambda: assistant.is_busy,
+                        system_prompt=_personality,
+                        interval=20.0,
+                    )
+                    deepface_commentator.start()
+                    logger.info("👁️ DeepFace Vision activado con cámara + comentarios")
+                else:
+                    logger.warning(f"⚠️ No se pudo iniciar DeepFace stream: {result.get('error')}")
+                    deepface_stream = None
+            else:
+                logger.warning("⚠️ DeepFace Vision no disponible (instala: pip install deepface opencv-python)")
+                deepface_stream = None
+        except Exception as e:
+            logger.warning(f"⚠️ Error inicializando DeepFace Vision: {e}")
+            deepface_stream = None
+            deepface_commentator = None
+    else:
+        logger.info("👁️ DeepFace Vision desactivado (usa --vision o RAYMUNDO_VISION=1 para activar)")
+
     assistant.start()
     try:
         gui.run()  # bloquea en el hilo principal (tk mainloop)
     finally:
+        if deepface_commentator:
+            deepface_commentator.stop()
+        if deepface_stream:
+            deepface_stream.stop()
         assistant.stop()
         logger.info("👋 Asistente de voz apagado.")
 

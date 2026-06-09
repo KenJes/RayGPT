@@ -1,0 +1,2716 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sistema de Planeación Didáctica - UAEMex</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Arial', 'Helvetica', sans-serif;
+            background: linear-gradient(135deg, #1e5128 0%, #4e9f3d 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 10px 50px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+
+        .header-uaemex {
+            background: #1e5128;
+            color: white;
+            padding: 25px 40px;
+            text-align: center;
+            border-bottom: 5px solid #d4af37;
+        }
+
+        .header-uaemex h1 {
+            font-size: 1.8em;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .header-uaemex p {
+            font-size: 1em;
+            opacity: 0.95;
+            margin-top: 5px;
+        }
+
+        .form-wrapper {
+            padding: 40px;
+        }
+
+        .info-card {
+            background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
+            border-left: 5px solid #1e5128;
+            padding: 20px;
+            margin-bottom: 30px;
+            border-radius: 8px;
+        }
+
+        .info-card h3 {
+            color: #1e5128;
+            margin-bottom: 10px;
+            font-size: 1.2em;
+        }
+
+        .info-card p {
+            color: #2e7d32;
+            line-height: 1.6;
+            margin: 5px 0;
+        }
+
+        .section-card {
+            background: #f9f9f9;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            padding: 30px;
+            margin-bottom: 25px;
+            transition: all 0.3s ease;
+        }
+
+        .section-card:hover {
+            border-color: #1e5128;
+            box-shadow: 0 5px 15px rgba(30, 81, 40, 0.1);
+        }
+
+        .section-title {
+            color: #1e5128;
+            font-size: 1.4em;
+            margin-bottom: 20px;
+            padding-bottom: 10px;
+            border-bottom: 3px solid #4e9f3d;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .section-number {
+            background: #1e5128;
+            color: white;
+            width: 35px;
+            height: 35px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #1e5128;
+            font-weight: 600;
+            font-size: 0.95em;
+        }
+
+        .required {
+            color: #d32f2f;
+            margin-left: 3px;
+        }
+
+        .form-group input[type="text"],
+        .form-group input[type="date"],
+        .form-group textarea,
+        .form-group select {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 1em;
+            transition: all 0.3s;
+            font-family: inherit;
+        }
+
+        .form-group input:focus,
+        .form-group textarea:focus,
+        .form-group select:focus {
+            outline: none;
+            border-color: #1e5128;
+            box-shadow: 0 0 0 3px rgba(30, 81, 40, 0.1);
+        }
+
+        .form-group textarea {
+            min-height: 100px;
+            resize: vertical;
+        }
+
+        .help-text {
+            font-size: 0.85em;
+            color: #666;
+            margin-top: 5px;
+            font-style: italic;
+        }
+
+        .dates-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 15px;
+        }
+
+        .unidad-box {
+            background: white;
+            border: 2px solid #4e9f3d;
+            border-radius: 10px;
+            padding: 25px;
+            margin-bottom: 20px;
+            position: relative;
+        }
+
+        .unidad-box::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 5px;
+            height: 100%;
+            background: linear-gradient(180deg, #1e5128 0%, #4e9f3d 100%);
+            border-radius: 10px 0 0 10px;
+        }
+
+        .unidad-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-left: 15px;
+        }
+
+        .unidad-title {
+            color: #1e5128;
+            font-size: 1.3em;
+            font-weight: bold;
+        }
+
+        .btn-delete {
+            background: #d32f2f;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 0.9em;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+
+        .btn-delete:hover {
+            background: #b71c1c;
+            transform: scale(1.05);
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #1e5128 0%, #4e9f3d 100%);
+            color: white;
+            border: none;
+            padding: 14px 35px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 1.05em;
+            font-weight: 700;
+            transition: all 0.3s;
+            margin: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            box-shadow: 0 4px 15px rgba(30, 81, 40, 0.3);
+        }
+
+        .btn:hover {
+            transform: translateY(-3px);
+            box-shadow: 0 6px 25px rgba(30, 81, 40, 0.4);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-add {
+            background: linear-gradient(135deg, #0277bd 0%, #01579b 100%);
+        }
+
+        .btn-generate {
+            background: linear-gradient(135deg, #c62828 0%, #b71c1c 100%);
+            font-size: 1.15em;
+            padding: 16px 40px;
+        }
+
+        .btn-download-word {
+            background: linear-gradient(135deg, #1976d2 0%, #0d47a1 100%);
+        }
+
+        .btn-download-pdf {
+            background: linear-gradient(135deg, #d32f2f 0%, #b71c1c 100%);
+        }
+
+        .btn-new {
+            background: linear-gradient(135deg, #f57c00 0%, #e65100 100%);
+        }
+
+        .loading-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 9999;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .loading-overlay.active {
+            display: flex;
+        }
+
+        .loading-content {
+            background: white;
+            padding: 40px;
+            border-radius: 15px;
+            text-align: center;
+            max-width: 400px;
+        }
+
+        .spinner {
+            border: 6px solid #f3f3f3;
+            border-top: 6px solid #1e5128;
+            border-radius: 50%;
+            width: 70px;
+            height: 70px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .loading-content h3 {
+            color: #1e5128;
+            margin-bottom: 10px;
+        }
+
+        .loading-content p {
+            color: #666;
+            line-height: 1.6;
+        }
+
+        .result-section {
+            display: none;
+            padding: 40px;
+            background: #fafafa;
+        }
+
+        .result-section.active {
+            display: block;
+        }
+
+        .planeacion-header {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            border-top: 5px solid #1e5128;
+        }
+
+        .planeacion-header h2 {
+            color: #1e5128;
+            font-size: 2em;
+            margin-bottom: 10px;
+            text-align: center;
+            text-transform: uppercase;
+        }
+
+        .planeacion-header .info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .info-item {
+            padding: 12px;
+            background: #f5f5f5;
+            border-radius: 6px;
+            border-left: 4px solid #4e9f3d;
+        }
+
+        .info-item strong {
+            color: #1e5128;
+            display: block;
+            margin-bottom: 5px;
+            font-size: 0.9em;
+        }
+
+        .info-item span {
+            color: #333;
+            font-size: 1em;
+        }
+
+        .tabla-planeacion {
+            width: 100%;
+            border-collapse: collapse;
+            background: white;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            border-radius: 10px;
+            overflow: hidden;
+            margin: 30px 0;
+        }
+
+        .tabla-planeacion thead {
+            background: linear-gradient(135deg, #1e5128 0%, #2e7d32 100%);
+            color: white;
+        }
+
+        .tabla-planeacion thead th {
+            padding: 18px 15px;
+            text-align: left;
+            font-weight: 700;
+            font-size: 0.95em;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-right: 1px solid rgba(255,255,255,0.1);
+        }
+
+        .tabla-planeacion thead th:last-child {
+            border-right: none;
+        }
+
+        .tabla-planeacion tbody td {
+            padding: 16px 15px;
+            border-bottom: 1px solid #e0e0e0;
+            vertical-align: top;
+            line-height: 1.6;
+            font-size: 0.92em;
+            color: #333;
+        }
+
+        .tabla-planeacion tbody tr {
+            transition: background 0.2s;
+        }
+
+        .tabla-planeacion tbody tr:hover {
+            background: #f5f5f5;
+        }
+
+        .tabla-planeacion tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        /* Estilos para tipos de sesión */
+        .sesion-introduccion {
+            background: #e3f2fd !important;
+            border-left: 5px solid #1976d2;
+        }
+
+        .sesion-regular {
+            background: white;
+        }
+
+        .sesion-preparacion {
+            background: #fff9c4 !important;
+            border-left: 5px solid #fbc02d;
+            font-weight: 600;
+        }
+
+        .sesion-examen {
+            background: #ffebee !important;
+            border-left: 5px solid #c62828;
+            font-weight: 700;
+        }
+
+        .sesion-suspension {
+            background: #f3e5f5 !important;
+            border-left: 5px solid #8e24aa;
+            font-style: italic;
+            opacity: 0.8;
+        }
+
+        .sesion-proyecto {
+            background: #e0f2f1 !important;
+            border-left: 5px solid #00897b;
+            font-weight: 600;
+        }
+
+        .sesion-viaje {
+            background: #e8f5e9 !important;
+            border-left: 5px solid #43a047;
+            font-weight: 600;
+        }
+
+        .tema-content strong {
+            color: #1e5128;
+            display: block;
+            margin-bottom: 5px;
+            font-size: 1.05em;
+        }
+
+        .actividades {
+            color: #555;
+            font-size: 0.9em;
+            margin-top: 8px;
+            padding-left: 10px;
+            border-left: 3px solid #4e9f3d;
+            line-height: 1.7;
+        }
+
+        .unidad-badge {
+            display: inline-block;
+            background: #1e5128;
+            color: white;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 0.85em;
+            font-weight: 600;
+        }
+
+        .download-section {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin: 30px 0;
+            flex-wrap: wrap;
+        }
+
+        .alert-warning {
+            background: #fff3cd;
+            border: 2px solid #ffc107;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 20px 0;
+            color: #856404;
+        }
+
+        .alert-warning strong {
+            display: block;
+            margin-bottom: 5px;
+        }
+
+        @media print {
+            body {
+                background: white;
+            }
+            
+            .form-wrapper,
+            .download-section,
+            .btn,
+            .loading-overlay {
+                display: none !important;
+            }
+
+            .result-section {
+                padding: 20px;
+            }
+
+            .tabla-planeacion {
+                box-shadow: none;
+                border: 1px solid #333;
+            }
+
+            .sesion-introduccion,
+            .sesion-preparacion,
+            .sesion-examen,
+            .sesion-suspension,
+            .sesion-proyecto,
+            .sesion-viaje {
+                print-color-adjust: exact;
+                -webkit-print-color-adjust: exact;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .form-row,
+            .dates-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .planeacion-header .info-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .tabla-planeacion {
+                font-size: 0.85em;
+            }
+
+            .tabla-planeacion thead th,
+            .tabla-planeacion tbody td {
+                padding: 10px 8px;
+            }
+        }
+
+        .api-key-toggle {
+            position: relative;
+        }
+
+        .toggle-visibility {
+            position: absolute;
+            right: 15px;
+            top: 42px;
+            cursor: pointer;
+            color: #666;
+            -webkit-user-select: none;
+            user-select: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header UAEMex -->
+        <div class="header-uaemex">
+            <h1>🎓 Universidad Autónoma del Estado de México</h1>
+            <p>Sistema de Planeación Didáctica Semestral</p>
+            <p style="font-size: 0.9em; margin-top: 5px;">Centro Universitario - Plataforma de Generación Inteligente</p>
+        </div>
+
+        <!-- Formulario -->
+        <div class="form-wrapper" id="formWrapper">
+            <div class="info-card">
+                <h3>📋 Instrucciones del Sistema</h3>
+                <p><strong>Objetivo:</strong> Generar planeaciones didácticas semestrales completas con metodologías pedagógicas avanzadas utilizando Inteligencia Artificial.</p>
+                <p><strong>Metodología:</strong> El sistema aplicará el método socrático, aprendizaje colaborativo y técnicas de evaluación formativa.</p>
+                <p><strong>Proceso:</strong> Complete todos los campos requeridos. La IA generará competencias específicas, actividades didácticas variadas y evaluaciones alineadas.</p>
+            </div>
+
+            <!-- Sección 1: Datos Generales -->
+            <div class="section-card">
+                <div class="section-title">
+                    <span class="section-number">1</span>
+                    <span>Datos Generales del Curso</span>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Plantel / Centro Universitario <span class="required">*</span></label>
+                        <input type="text" id="plantel" value="Centro Universitario UAEM Temascaltepec" placeholder="Ej: Centro Universitario UAEM Temascaltepec">
+                    </div>
+                    <div class="form-group">
+                        <label>Licenciatura <span class="required">*</span></label>
+                        <input type="text" id="licenciatura" value="Informática Administrativa" placeholder="Ej: Informática Administrativa">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Nombre del Docente <span class="required">*</span></label>
+                        <input type="text" id="docente" value="IDGS. Kenneth de Jesús Alcalá Beltrán" placeholder="IDGS. Kenneth de Jesús Alcalá Beltrán">
+                        
+                    </div>
+                    <div class="form-group">
+                        <label>Nombre de la Materia / Curso <span class="required">*</span></label>
+                        <input type="text" id="materia" placeholder="Ej: Legislación Informática">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Semestre <span class="required">*</span></label>
+                        <input type="text" id="semestre" placeholder="Ej: 2025A">
+                    </div>
+                    <div class="form-group">
+                        <label>Horas por Semana <span class="required">*</span></label>
+                        <select id="horasSemana" title="Seleccione la cantidad de horas de clase por semana">
+                            <option value="2">2 horas (1 sesión semanal)</option>
+                            <option value="3">3 horas (1-2 sesiones semanales)</option>
+                            <option value="4" selected>4 horas (2 sesiones semanales)</option>
+                            <option value="5">5 horas (2-3 sesiones semanales)</option>
+                            <option value="6">6 horas (3 sesiones semanales)</option>
+                            <option value="8">8 horas (4 sesiones semanales)</option>
+                        </select>
+                        <div class="help-text">Indica cuántas horas de clase hay por semana</div>
+                    </div>
+                </div>
+                
+                <div class="form-row">
+                    <div class="form-group" style="background: #e8f5e9; padding: 15px; border-radius: 8px; border: 2px solid #4caf50;">
+                        <label style="color: #2e7d32; font-weight: bold;">🖥️ Usando Ollama Local</label>
+                        <div class="help-text" style="color: #1b5e20;">
+                            <strong>🚀 Inicio Rápido:</strong><br>
+                            1. Haz doble clic en <strong>INICIAR_AQUI.bat</strong><br>
+                            2. Espera a que se abra el navegador automáticamente<br>
+                            3. ¡Listo! Ya puedes generar planeaciones<br><br>
+                            💡 El sistema detecta y configura Ollama automáticamente
+                        </div>
+                        <input type="hidden" id="apiKey" value="local">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sección 2: Calendario Académico -->
+            <div class="section-card">
+                <div class="section-title">
+                    <span class="section-number">2</span>
+                    <span>Calendario Académico</span>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Fecha de Inicio de Clases <span class="required">*</span></label>
+                        <input type="date" id="inicioClases" title="Seleccione la fecha de inicio de clases">
+                    </div>
+                    <div class="form-group">
+                        <label>Fecha de Fin de Clases <span class="required">*</span></label>
+                        <input type="date" id="finClases" title="Seleccione la fecha de fin de clases">
+                    </div>
+                </div>
+
+                <h4 style="color: #1e5128; margin: 25px 0 15px 0; font-size: 1.1em;">📝 Períodos de Exámenes Parciales</h4>
+                <div class="form-group">
+                    <label>Primer Período de Exámenes <span class="required">*</span></label>
+                    <div class="form-row">
+                        <input type="date" id="examen1Inicio" value="2025-03-25" title="Fecha de inicio del primer período de exámenes">
+                        <input type="date" id="examen1Fin" value="2025-04-09" title="Fecha de fin del primer período de exámenes">
+                    </div>
+                    <div class="help-text">Por defecto: 25 de marzo al 9 de abril de 2025</div>
+                </div>
+                <div class="form-group">
+                    <label>Segundo Período de Exámenes <span class="required">*</span></label>
+                    <div class="form-row">
+                        <input type="date" id="examen2Inicio" value="2025-05-29" title="Fecha de inicio del segundo período de exámenes">
+                        <input type="date" id="examen2Fin" value="2025-06-08" title="Fecha de fin del segundo período de exámenes">
+                    </div>
+                    <div class="help-text">Por defecto: 29 de mayo al 8 de junio de 2025</div>
+                </div>
+
+                <h4 style="color: #1e5128; margin: 25px 0 15px 0; font-size: 1.1em;">🚫 Suspensiones de Labores</h4>
+                <div class="form-group">
+                    <label>Fechas de Suspensión</label>
+                    <div id="suspensionesContainer" style="display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 10px;"></div>
+                    <button type="button" class="btn" style="padding: 8px 16px; font-size: 0.9em;" onclick="agregarSuspension()">➕ Agregar Fecha de Suspensión</button>
+                    <div class="help-text">Días festivos, asuetos oficiales, etc.</div>
+                </div>
+
+                <h4 style="color: #0277bd; margin: 25px 0 15px 0; font-size: 1.1em;">✈️ Actividades Especiales (Opcional)</h4>
+                <div class="form-group">
+                    <label>Viajes de Estudio / Prácticas de Campo</label>
+                    <div id="viajesContainer" style="margin-bottom: 10px;"></div>
+                    <button type="button" class="btn" style="padding: 8px 16px; font-size: 0.9em;" onclick="agregarViaje()">➕ Agregar Viaje de Estudio</button>
+                    <div class="help-text">Prácticas de campo, visitas empresariales, congresos (puede ser de varios días)</div>
+                </div>
+                <div class="form-group">
+                    <label>Fechas de Entrega de Proyectos</label>
+                    <div id="proyectosContainer" style="display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 10px;"></div>
+                    <button type="button" class="btn" style="padding: 8px 16px; font-size: 0.9em;" onclick="agregarProyecto()">➕ Agregar Fecha de Proyecto</button>
+                    <div class="help-text">Proyectos integradores, entregas finales</div>
+                </div>
+            </div>
+
+            <!-- Sección 3: Temario -->
+            <div class="section-card">
+                <div class="section-title">
+                    <span class="section-number">3</span>
+                    <span>Temario del Curso</span>
+                </div>
+
+                <div class="form-group" style="background: #e3f2fd; padding: 20px; border-radius: 8px; margin-bottom: 25px;">
+                    <label style="color: #0d47a1; font-size: 1.1em;">📎 Pegar Temario Oficial (Opcional - Recomendado)</label>
+                    <div class="help-text" style="color: #1565c0; margin-bottom: 10px;">📋 <strong>Instrucciones:</strong> Abre tu PDF del programa de estudios, copia el texto (Ctrl+A, Ctrl+C) y pégalo abajo. La IA extraerá automáticamente: <strong>nombre de unidades</strong>, <strong>objetivos por unidad</strong> y <strong>lista de temas</strong>.</div>
+                    <textarea id="temarioTexto" placeholder="Pega aquí el texto completo del programa de estudios oficial...&#10;&#10;Ejemplo:&#10;UNIDAD 1: Fundamentos de Legislación Informática&#10;Objetivo: Comprender los principios básicos...&#10;Temas:&#10;1. Marco jurídico de la informática&#10;2. Ley Federal de Protección de Datos...&#10;&#10;UNIDAD 2: ..." style="width: 100%; min-height: 200px; padding: 12px; border: 2px solid #1976d2; border-radius: 8px; font-family: monospace; font-size: 0.9em; resize: vertical;"></textarea>
+                    <div style="display: flex; gap: 10px; margin-top: 10px; align-items: center;">
+                        <button type="button" class="btn" style="padding: 10px 20px; font-size: 0.95em;" onclick="procesarTemario()">🔍 Analizar Temario con IA</button>
+                        <button type="button" class="btn" style="padding: 10px 20px; font-size: 0.95em; background: linear-gradient(135deg, #f57c00 0%, #e65100 100%);" onclick="limpiarTemario()">🗑️ Limpiar</button>
+                        <span style="color: #0277bd; font-size: 0.85em;">💡 Tip: Asegúrate de copiar TODO el texto del PDF</span>
+                    </div>
+                    <div id="statusTemario" style="margin-top: 10px; font-weight: 600;"></div>
+                </div>
+
+                <div id="unidadesContainer"></div>
+
+                <div style="text-align: center; margin-top: 20px;">
+                    <button class="btn btn-add" onclick="agregarUnidad()">
+                        ➕ Agregar Nueva Unidad
+                    </button>
+                </div>
+            </div>
+
+            <!-- Botones de Acción -->
+            <div style="text-align: center; margin: 40px 0;">
+                <div style="display: flex; gap: 15px; justify-content: center; flex-wrap: wrap; margin-bottom: 20px;">
+                    <button class="btn" style="background: linear-gradient(135deg, #0288d1 0%, #0277bd 100%); padding: 12px 24px;" onclick="guardarProgreso()">
+                        💾 Guardar Progreso
+                    </button>
+                    <button class="btn" style="background: linear-gradient(135deg, #f57c00 0%, #e65100 100%); padding: 12px 24px;" onclick="document.getElementById('cargarArchivo').click()">
+                        📂 Cargar Progreso
+                    </button>
+                    <input type="file" id="cargarArchivo" accept=".json" style="display: none;" onchange="cargarProgreso(this)">
+                </div>
+                <button class="btn btn-generate" onclick="generarPlaneacion()" id="btnGenerar">
+                    🚀 Generar Planeación Didáctica con IA
+                </button>
+                <div style="margin-top: 10px; font-size: 0.85em; color: #666;">
+                    💡 Tu progreso se guarda automáticamente cada vez que modificas el formulario
+                </div>
+            </div>
+        </div>
+
+        <!-- Loading -->
+        <div class="loading-overlay" id="loadingOverlay">
+            <div class="loading-content">
+                <div class="spinner"></div>
+                <h3>Generando Planeación Didáctica</h3>
+                <p>La IA está procesando su temario y creando competencias específicas, actividades pedagógicas y evaluaciones alineadas...</p>
+                <p id="progresoTexto" style="margin-top: 15px; color: #1e5128; font-weight: bold;">Por favor espere, esto puede tomar 30-60 segundos.</p>
+            </div>
+        </div>
+
+        <!-- Resultado -->
+        <div class="result-section" id="resultSection">
+            <div class="planeacion-header" id="planeacionHeader"></div>
+            
+            <div class="download-section">
+                <button class="btn btn-download-word" onclick="descargarWord()">
+                    📄 Descargar Word (.doc)
+                </button>
+                <button class="btn btn-download-pdf" onclick="descargarPDF()">
+                    📕 Descargar PDF
+                </button>
+                <button class="btn btn-new" onclick="nuevaPlaneacion()">
+                    🔄 Nueva Planeación
+                </button>
+            </div>
+
+            <div id="planeacionTabla"></div>
+
+            <div class="download-section">
+                <button class="btn btn-download-word" onclick="descargarWord()">
+                    📄 Descargar Word (.doc)
+                </button>
+                <button class="btn btn-download-pdf" onclick="descargarPDF()">
+                    📕 Descargar PDF
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ==================== VARIABLES GLOBALES ====================
+        let contadorUnidades = 0;
+        let datosPlaneacion = null;
+        let contadorSuspensiones = 0;
+        let contadorViajes = 0;
+        let contadorProyectos = 0;
+
+        // ==================== INICIALIZACIÓN ====================
+        window.onload = function() {
+            agregarUnidad();
+        };
+
+        // ==================== FUNCIONES DE UNIDADES ====================
+        function agregarUnidad() {
+            contadorUnidades++;
+            const container = document.getElementById('unidadesContainer');
+            const unidadDiv = document.createElement('div');
+            unidadDiv.className = 'unidad-box';
+            unidadDiv.id = `unidad-${contadorUnidades}`;
+            
+            unidadDiv.innerHTML = `
+                <div class="unidad-header">
+                    <div class="unidad-title">Unidad ${contadorUnidades}</div>
+                    ${contadorUnidades > 1 ? `<button class="btn-delete" onclick="eliminarUnidad(${contadorUnidades})">❌ Eliminar Unidad</button>` : ''}
+                </div>
+                
+                <div class="form-group">
+                    <label>Nombre de la Unidad <span class="required">*</span></label>
+                    <input type="text" class="unidad-nombre" placeholder="Ej: Fundamentos de Legislación Informática" required>
+                </div>
+                
+                <div class="form-group">
+                    <label>Objetivo de la Unidad <span class="required">*</span></label>
+                    <textarea class="unidad-objetivo" placeholder="Ej: Comprender los principios básicos del derecho informático mexicano, identificando las leyes aplicables a la protección de datos, propiedad intelectual y delitos cibernéticos..." required></textarea>
+                    <div class="help-text">Describa qué competencias desarrollarán los estudiantes en esta unidad</div>
+                </div>
+                
+                <div class="form-group">
+                    <label>Temas de la Unidad <span class="required">*</span> <small>(uno por línea)</small></label>
+                    <textarea class="unidad-temas" placeholder="Marco jurídico de la informática en México
+Ley Federal de Protección de Datos Personales
+Propiedad intelectual en software
+Delitos informáticos y ciberseguridad
+Contratos electrónicos y firma digital" required></textarea>
+                    <div class="help-text">Liste cada tema en una línea separada. Estos se distribuirán a lo largo del semestre.</div>
+                </div>
+            `;
+            
+            container.appendChild(unidadDiv);
+        }
+
+        function eliminarUnidad(id) {
+            const unidad = document.getElementById(`unidad-${id}`);
+            if (unidad && confirm('¿Está seguro de eliminar esta unidad?')) {
+                unidad.remove();
+            }
+        }
+
+        function obtenerUnidades() {
+            const unidades = [];
+            const containers = document.querySelectorAll('.unidad-box');
+            
+            containers.forEach((container, index) => {
+                const nombre = container.querySelector('.unidad-nombre').value.trim();
+                const objetivo = container.querySelector('.unidad-objetivo').value.trim();
+                const temasText = container.querySelector('.unidad-temas').value.trim();
+                const temas = temasText.split('\n').filter(t => t.trim() !== '').map(t => t.trim());
+                
+                if (nombre && objetivo && temas.length > 0) {
+                    unidades.push({
+                        numero: index + 1,
+                        nombre: nombre,
+                        objetivo: objetivo,
+                        temas: temas
+                    });
+                }
+            });
+            
+            return unidades;
+        }
+
+        // ==================== VALIDACIÓN ====================
+        function validarFormulario() {
+            const campos = {
+                plantel: document.getElementById('plantel').value.trim(),
+                licenciatura: document.getElementById('licenciatura').value.trim(),
+                docente: document.getElementById('docente').value.trim(),
+                materia: document.getElementById('materia').value.trim(),
+                semestre: document.getElementById('semestre').value.trim(),
+                apiKey: document.getElementById('apiKey').value.trim(),
+                inicioClases: document.getElementById('inicioClases').value,
+                finClases: document.getElementById('finClases').value,
+                examen1Inicio: document.getElementById('examen1Inicio').value,
+                examen1Fin: document.getElementById('examen1Fin').value,
+                examen2Inicio: document.getElementById('examen2Inicio').value,
+                examen2Fin: document.getElementById('examen2Fin').value
+            };
+
+            // Validar campos obligatorios
+            for (let [key, value] of Object.entries(campos)) {
+                if (!value) {
+                    alert(`Por favor complete el campo: ${key.replace(/([A-Z])/g, ' $1').toLowerCase()}`);
+                    return false;
+                }
+            }
+
+            // Validar fechas
+            const inicio = new Date(campos.inicioClases);
+            const fin = new Date(campos.finClases);
+            
+            if (inicio >= fin) {
+                alert('La fecha de fin de clases debe ser posterior a la fecha de inicio.');
+                return false;
+            }
+
+            // Validar unidades
+            const unidades = obtenerUnidades();
+            if (unidades.length === 0) {
+                alert('Debe agregar al menos una unidad completa con nombre, objetivo y temas.');
+                return false;
+            }
+
+            return true;
+        }
+
+        // ==================== UTILIDADES DE FECHAS ====================
+        function parsearFechas(texto) {
+            if (!texto || texto.trim() === '') return [];
+            return texto.split(',')
+                .map(f => f.trim())
+                .filter(f => f !== '')
+                .map(f => {
+                    const fecha = new Date(f + 'T00:00:00');
+                    return isNaN(fecha.getTime()) ? null : fecha;
+                })
+                .filter(f => f !== null);
+        }
+
+        function generarFechasRango(inicio, fin) {
+            const fechas = [];
+            const fechaActual = new Date(inicio);
+            const fechaFin = new Date(fin);
+            
+            while (fechaActual <= fechaFin) {
+                fechas.push(new Date(fechaActual));
+                fechaActual.setDate(fechaActual.getDate() + 1);
+            }
+            
+            return fechas;
+        }
+
+        function formatearFecha(fecha) {
+            const dia = fecha.getDate();
+            const mes = fecha.toLocaleDateString('es-MX', { month: 'long' });
+            return `${dia} ${mes}`;
+        }
+
+        function formatearFechaCompleta(fecha) {
+            return fecha.toLocaleDateString('es-MX', { 
+                year: 'numeric', 
+                month: 'long', 
+                day: 'numeric' 
+            });
+        }
+
+        
+        function generarFechasSesiones() {
+            const inicio = new Date(document.getElementById('inicioClases').value + 'T00:00:00');
+            const fin = new Date(document.getElementById('finClases').value + 'T00:00:00');
+
+            // Horas por semana -> sesiones por semana (aprox). Ajusta el mapeo si tu curso usa otra lógica.
+            const horasSemana = parseInt(document.getElementById('horasSemana').value, 10) || 4;
+            const sesionesPorSemanaMap = { 2: 1, 3: 1, 4: 2, 5: 2, 6: 3, 8: 4 };
+            const sesionesPorSemana = sesionesPorSemanaMap[horasSemana] || Math.max(1, Math.round(horasSemana / 2));
+
+            // Patrón sugerido de días (L=1 ... V=5). Puedes cambiarlo si tu horario es distinto.
+            const patronesDias = {
+                1: [2],          // Mar
+                2: [2,3],         // Mar/Mié
+                3: [2, 4],       // Mar/Jue|
+                4: [1, 3, 5],    // Lun/Mié/Vie
+                5: [1, 2, 4, 5],  // Lun/Mar/Jue/Vie
+                6: [1, 3],         // Lun/Mié
+                7: [3, 4]         // Mié/Jue
+                
+            };
+            const diasObjetivo = patronesDias[sesionesPorSemana] || patronesDias[2];
+
+            // Períodos de exámenes
+            const examen1Inicio = new Date(document.getElementById('examen1Inicio').value + 'T00:00:00');
+            const examen1Fin = new Date(document.getElementById('examen1Fin').value + 'T00:00:00');
+            const examen2Inicio = new Date(document.getElementById('examen2Inicio').value + 'T00:00:00');
+            const examen2Fin = new Date(document.getElementById('examen2Fin').value + 'T00:00:00');
+
+            // Fechas excluidas
+            const suspensiones = parsearFechas(obtenerSuspensiones());
+            const viajes = obtenerViajes();
+            const proyectos = parsearFechas(obtenerProyectos());
+
+            function fechaKeyLocal(fecha) {
+                const y = fecha.getFullYear();
+                const m = String(fecha.getMonth() + 1).padStart(2, '0');
+                const d = String(fecha.getDate()).padStart(2, '0');
+                return `${y}-${m}-${d}`;
+            }
+
+            function generarKeysRango(inicioR, finR) {
+                const keys = [];
+                const f = new Date(inicioR);
+                const end = new Date(finR);
+                while (f <= end) {
+                    keys.push(fechaKeyLocal(f));
+                    f.setDate(f.getDate() + 1);
+                }
+                return keys;
+            }
+
+            const excluidas = new Set();
+
+            // Exámenes (todo el rango queda excluido de sesiones)
+            generarKeysRango(examen1Inicio, examen1Fin).forEach(k => excluidas.add(k));
+            generarKeysRango(examen2Inicio, examen2Fin).forEach(k => excluidas.add(k));
+
+            // Suspensiones / proyectos
+            suspensiones.forEach(f => excluidas.add(fechaKeyLocal(f)));
+            proyectos.forEach(f => excluidas.add(fechaKeyLocal(f)));
+
+            // Viajes (rango)
+            viajes.forEach(v => {
+                if (v.inicio && v.fin) {
+                    const vi = new Date(v.inicio + 'T00:00:00');
+                    const vf = new Date(v.fin + 'T00:00:00');
+                    generarKeysRango(vi, vf).forEach(k => excluidas.add(k));
+                }
+            });
+
+            // Semana ISO simple (inicio en lunes)
+            function inicioSemanaLunes(fecha) {
+                const f = new Date(fecha);
+                const day = f.getDay(); // 0 dom ... 6 sáb
+                const diff = (day === 0 ? -6 : 1 - day);
+                f.setDate(f.getDate() + diff);
+                f.setHours(0, 0, 0, 0);
+                return f;
+            }
+
+            const fechasSesiones = [];
+            let semana = inicioSemanaLunes(inicio);
+
+            while (semana <= fin) {
+                // Generar en orden según el patrón
+                for (const dia of diasObjetivo) {
+                    const f = new Date(semana);
+                    f.setDate(semana.getDate() + (dia - 1)); // Lun + (dia-1)
+                    if (f < inicio || f > fin) continue;
+                    const k = fechaKeyLocal(f);
+                    if (!excluidas.has(k)) {
+                        // Evitar fines de semana por seguridad (aunque patrón no los incluye)
+                        const ds = f.getDay();
+                        if (ds !== 0 && ds !== 6) {
+                            fechasSesiones.push(new Date(f));
+                        }
+                    }
+                }
+                semana.setDate(semana.getDate() + 7);
+            }
+
+            return fechasSesiones;
+        }
+
+        // ==================== CALCULAR DISTRIBUCIÓN DE SESIONES ====================
+        function calcularDistribucionSesiones(fechasSesiones, fechaExamen1Inicio) {
+            if (!fechasSesiones || fechasSesiones.length === 0) {
+                return { primerParcial: 0, segundoParcial: 0 };
+            }
+
+            // Contar cuántas sesiones ocurren antes del primer examen
+            let primerParcial = 0;
+            for (const fecha of fechasSesiones) {
+                if (fecha < fechaExamen1Inicio) {
+                    primerParcial++;
+                } else {
+                    break;
+                }
+            }
+
+            // El resto son del segundo parcial
+            const segundoParcial = fechasSesiones.length - primerParcial;
+
+            return { primerParcial, segundoParcial };
+        }
+
+        // ==================== MOSTRAR PROGRESO ====================
+        function mostrarProgreso(mensaje) {
+            const elemento = document.getElementById('progresoTexto');
+            if (elemento) {
+                elemento.textContent = mensaje;
+            }
+        }
+
+
+        // ==================== GENERACIÓN DE PROMPT PARA IA ====================
+        
+        // ==================== PLAN DE VARIEDAD Y BLOOM ====================
+        const ACTIVIDAD_TIPOS = [
+            "Exposición dialógica socrática",
+            "Debate estructurado",
+            "Análisis crítico de caso real",
+            "Simulación profesional / role-play",
+            "Aprendizaje Basado en Problemas (ABP)",
+            "Taller práctico hands-on",
+            "Peer teaching (estudiantes enseñan)",
+            "Mapa conceptual colaborativo",
+            "Investigación guiada con fuentes",
+            "Gamificación con retos",
+            "Creación de contenido multimedia",
+            "Mesa redonda / seminario socrático"
+        ];
+
+        function generarSemillaCreativa() {
+            try {
+                const bytes = new Uint8Array(8);
+                crypto.getRandomValues(bytes);
+                return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+            } catch {
+                return String(Math.random()).slice(2, 10);
+            }
+        }
+
+        function generarPlanBloom(numSesiones) {
+            // Progresión simple de Bloom: inicio (1-2) -> medio (3-4) -> cierre (4-6)
+            const niveles = [];
+            const tramo1 = Math.max(2, Math.round(numSesiones * 0.2));
+            const tramo3 = Math.max(3, Math.round(numSesiones * 0.25));
+            const tramo2 = Math.max(0, numSesiones - tramo1 - tramo3);
+
+            const opciones1 = ["Recordar", "Comprender"];
+            const opciones2 = ["Aplicar", "Analizar"];
+            const opciones3 = ["Analizar", "Evaluar", "Crear"];
+
+            for (let i = 0; i < tramo1; i++) niveles.push(opciones1[i % opciones1.length]);
+            for (let i = 0; i < tramo2; i++) niveles.push(opciones2[i % opciones2.length]);
+            for (let i = 0; i < tramo3; i++) niveles.push(opciones3[i % opciones3.length]);
+
+            // Asegurar longitud exacta
+            return niveles.slice(0, numSesiones);
+        }
+
+        function barajar(array) {
+            const a = array.slice();
+            for (let i = a.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [a[i], a[j]] = [a[j], a[i]];
+            }
+            return a;
+        }
+
+        function generarPlanVariedad(numSesiones, distribucion) {
+            const planBloom = generarPlanBloom(numSesiones);
+            const plan = Array.from({ length: numSesiones }, (_, i) => ({
+                sesion: i + 1,
+                tipo_actividad: null,
+                nivel_bloom: planBloom[i] || "Comprender"
+            }));
+
+            const idxIntro = 1;
+            const idxRepaso1 = distribucion?.primerParcial || Math.max(2, Math.round(numSesiones / 2));
+            const idxRepaso2 = (distribucion?.primerParcial || 0) + (distribucion?.segundoParcial || 0);
+
+            // Tipos fijos
+            if (plan[idxIntro - 1]) plan[idxIntro - 1].tipo_actividad = "Introducción interactiva y encuadre";
+            if (plan[idxRepaso1 - 1]) plan[idxRepaso1 - 1].tipo_actividad = "Repaso integrador (simulacro + retroalimentación)";
+            if (plan[idxRepaso2 - 1]) plan[idxRepaso2 - 1].tipo_actividad = "Repaso integrador (caso integrador + retroalimentación)";
+
+            // Rellenar restantes evitando repetición consecutiva
+            let bolsa = barajar(ACTIVIDAD_TIPOS);
+            let b = 0;
+
+            for (let i = 0; i < plan.length; i++) {
+                if (plan[i].tipo_actividad) continue;
+
+                let intento = 0;
+                while (intento < 50) {
+                    if (b >= bolsa.length) {
+                        bolsa = barajar(ACTIVIDAD_TIPOS);
+                        b = 0;
+                    }
+                    const candidato = bolsa[b++];
+                    const anterior = i > 0 ? plan[i - 1].tipo_actividad : null;
+                    if (candidato !== anterior) {
+                        plan[i].tipo_actividad = candidato;
+                        break;
+                    }
+                    intento++;
+                }
+                if (!plan[i].tipo_actividad) plan[i].tipo_actividad = ACTIVIDAD_TIPOS[i % ACTIVIDAD_TIPOS.length];
+            }
+
+            return plan;
+        }
+
+        // ==================== GENERACIÓN DE PROMPT PARA IA ====================
+        function generarPromptIA(materia, unidades, numSesiones, distribucion, planVariedad) {
+            const totalTemas = unidades.reduce((sum, u) => sum + (u.temas?.length || 0), 0);
+            const semilla = generarSemillaCreativa();
+
+            // Dividir unidades por parcial de forma robusta (mitad y mitad por orden)
+            const corte = Math.max(1, Math.ceil(unidades.length / 2));
+            const unidadesParcial1 = unidades.slice(0, corte);
+            const unidadesParcial2 = unidades.slice(corte);
+
+            // Recomendación de sesiones por unidad (ponderado por cantidad de temas)
+            const sesionesContenidoP1 = Math.max(0, (distribucion.primerParcial || 0) - 2); // intro + repaso
+            const sesionesContenidoP2 = Math.max(0, (distribucion.segundoParcial || 0) - 1); // repaso
+            function asignarSesiones(unidadesParcial, sesionesContenido) {
+                if (unidadesParcial.length === 0) return {};
+                const pesos = unidadesParcial.map(u => Math.max(1, (u.temas?.length || 1)));
+                const totalPeso = pesos.reduce((a, b) => a + b, 0);
+                const base = unidadesParcial.map((u, i) => Math.max(1, Math.round((pesos[i] / totalPeso) * sesionesContenido)));
+                // Ajuste para que sumen exactamente
+                let sumBase = base.reduce((a, b) => a + b, 0);
+                while (sumBase > sesionesContenido && base.length > 0) {
+                    const idx = base.findIndex(v => v > 1);
+                    if (idx === -1) break;
+                    base[idx] -= 1;
+                    sumBase -= 1;
+                }
+                while (sumBase < sesionesContenido && base.length > 0) {
+                    const idx = Math.floor(Math.random() * base.length);
+                    base[idx] += 1;
+                    sumBase += 1;
+                }
+                const out = {};
+                unidadesParcial.forEach((u, i) => out[u.numero] = base[i] || 1);
+                return out;
+            }
+            const sesionesPorUnidadP1 = asignarSesiones(unidadesParcial1, sesionesContenidoP1);
+            const sesionesPorUnidadP2 = asignarSesiones(unidadesParcial2, sesionesContenidoP2);
+
+            const planVariedadTxt = (planVariedad || []).map(p =>
+                `Sesión ${p.sesion}: tipo_actividad="${p.tipo_actividad}", nivel_bloom="${p.nivel_bloom}"`
+            ).join('\n');
+
+            let prompt = `Eres un experto pedagogo especializado en diseño instruccional universitario. Genera una planeación didáctica semestral DETALLADA, variada y NO genérica para la materia "${materia}".
+
+SEMILLA CREATIVA (úsala para variar decisiones y ejemplos): ${semilla}
+
+CONTEXTO:
+- Nivel: Educación Superior (Pregrado)
+- Modalidad: Presencial
+- Total de sesiones de clase: ${numSesiones}
+- Total de unidades: ${unidades.length}
+- Total de temas: ${totalTemas}
+
+REGLAS DE CALIDAD (OBLIGATORIAS):
+1) NO repitas tipos de actividades en sesiones consecutivas.
+2) Evita frases genéricas como: "el docente explicará", "revisar el tema", "comprender los conceptos básicos".
+3) Cada sesión debe incluir: (a) 2-4 preguntas socráticas profundas, (b) actividades con INICIO-DESARROLLO-CIERRE y tiempos en minutos, (c) evidencia/producto, (d) evaluación formativa breve (cómo retroalimentas en esa sesión).
+4) La competencia debe ser medible y específica (verbo Bloom + objeto + contexto + criterio).
+5) Incluye ejemplos/casos situados en el campo profesional (empresa/sector público/tecnología) según el tema.
+
+📊 DISTRIBUCIÓN POR PARCIAL:
+- PRIMER PARCIAL: ${distribucion.primerParcial} sesiones (Sesión 1: Introducción, Sesión ${distribucion.primerParcial}: Repaso 1).
+  Unidades: ${unidadesParcial1.map(u => u.numero).join(', ')}.
+  Recomendación de sesiones por unidad (contenido): ${Object.entries(sesionesPorUnidadP1).map(([u, s]) => `U${u}=${s}`).join(', ') || 'N/A'}.
+- SEGUNDO PARCIAL: ${distribucion.segundoParcial} sesiones (Sesión ${distribucion.primerParcial + distribucion.segundoParcial}: Repaso 2).
+  Unidades: ${unidadesParcial2.map(u => u.numero).join(', ') || '(sin unidades extra)'}.
+  Recomendación de sesiones por unidad (contenido): ${Object.entries(sesionesPorUnidadP2).map(([u, s]) => `U${u}=${s}`).join(', ') || 'N/A'}.
+
+PLAN DE VARIEDAD (OBLIGATORIO - respétalo exactamente):
+${planVariedadTxt}
+
+UNIDADES DEL CURSO:
+`;
+
+            unidades.forEach(u => {
+                const parcial = u.numero <= corte ? 'PRIMER' : 'SEGUNDO';
+                prompt += `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+UNIDAD ${u.numero}: ${u.nombre} [${parcial} PARCIAL]
+Objetivo: ${u.objetivo}
+Temas (${u.temas.length}):
+${u.temas.map((t, i) => `  ${i + 1}. ${t}`).join('\n')}
+`;
+            });
+
+            prompt += `\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+FORMATO DE RESPUESTA (JSON ESTRICTO):
+Responde ÚNICAMENTE con un array JSON válido, sin texto antes ni después.
+
+Cada objeto (sesión) DEBE tener EXACTAMENTE estas claves:
+{
+  "sesion": 1,
+  "tema": "título específico (no genérico)",
+  "unidad": 0 o número de unidad,
+  "tipo_actividad": "debe coincidir con el plan de variedad",
+  "nivel_bloom": "debe coincidir con el plan de variedad",
+  "competencia": "Los estudiantes [verbo Bloom] ... (medible y específica)",
+  "preguntas_socraticas": ["pregunta 1", "pregunta 2", "..."],
+  "actividades": [
+    {"momento":"Inicio","duracion_min":15,"descripcion":"...","evidencia":"..."},
+    {"momento":"Desarrollo","duracion_min":60,"descripcion":"...","evidencia":"..."},
+    {"momento":"Cierre","duracion_min":15,"descripcion":"...","evidencia":"..."}
+  ],
+  "evaluacion_formativa": "cómo se retroalimenta (1-2 líneas)"
+}
+
+SESIONES ESPECIALES OBLIGATORIAS:
+- Sesión 1: Introducción interactiva y encuadre. Unidad 0.
+- Sesión ${distribucion.primerParcial}: Repaso integrador del primer parcial (unidades ${unidadesParcial1.map(u => u.numero).join(', ')}). Unidad 0.
+- Sesión ${distribucion.primerParcial + distribucion.segundoParcial}: Repaso integrador del segundo parcial (unidades ${unidadesParcial2.map(u => u.numero).join(', ') || 'del curso'}). Unidad 0.
+
+RESTRICCIONES FINALES:
+- Debes generar EXACTAMENTE ${numSesiones} objetos.
+- Los campos "tipo_actividad" y "nivel_bloom" deben coincidir EXACTAMENTE con el plan de variedad.
+- "actividades" debe tener 3 elementos (Inicio/Desarrollo/Cierre) con tiempos razonables.
+- "preguntas_socraticas" debe tener mínimo 2 preguntas por sesión.
+
+GENERA LA PLANEACIÓN AHORA:`;
+
+            return prompt;
+        }
+
+
+        function generarPromptCorreccion(materia, numSesiones, planVariedad, validacion, borradorJSON) {
+            const planVariedadTxt = (planVariedad || []).map(p =>
+                `Sesión ${p.sesion}: tipo_actividad="${p.tipo_actividad}", nivel_bloom="${p.nivel_bloom}"`
+            ).join('\n');
+
+            const errores = (validacion?.errores || []).slice(0, 25).map(e => `- ${e}`).join('\n');
+            const advertencias = (validacion?.advertencias || []).slice(0, 25).map(a => `- ${a}`).join('\n');
+
+            return `Corrige el siguiente BORRADOR de planeación para la materia "${materia}".
+Debes devolver ÚNICAMENTE el array JSON corregido (sin texto adicional).
+
+OBJETIVO:
+- Mantener EXACTAMENTE ${numSesiones} objetos (sesiones).
+- Corregir los ERRORES listados.
+- Respetar EXACTAMENTE el plan de variedad (tipo_actividad y nivel_bloom).
+
+PLAN DE VARIEDAD (OBLIGATORIO):
+${planVariedadTxt}
+
+ERRORES A CORREGIR (obligatorio):
+${errores || '- (sin lista)'}
+
+ADVERTENCIAS (si es posible):
+${advertencias || '- (sin lista)'}
+
+REGLAS:
+- No repitas tipo_actividad en sesiones consecutivas.
+- Mantén el esquema de claves y arreglos (actividades con 3 momentos; preguntas_socraticas >= 2).
+
+BORRADOR JSON:
+${borradorJSON}`;
+        }
+
+
+        
+        // ==================== LLAMADA A OLLAMA LOCAL ====================
+        async function llamarOllamaAPI(apiKey, prompt, opts = {}) {
+            try {
+                const payload = {
+                    model: opts.model || 'llama3.2:3b',  // CAMBIO: modelo más confiable para JSON
+                    messages: [
+                        {
+                            role: 'system',
+                            content: opts.system || (
+                                'You are a pedagogical expert. ' +
+                                'CRITICAL: You MUST respond with ONLY valid JSON. ' +
+                                'NO explanations, NO markdown, NO additional text. ' +
+                                'Start with [ and end with ]. Nothing else. ' +
+                                'Use ONLY English characters in property names. ' +
+                                'All strings must use proper JSON escaping.'
+                            )
+                        },
+                        { role: 'user', content: prompt }
+                    ],
+                    stream: false,
+                    options: {
+                        temperature: (typeof opts.temperature === 'number') ? opts.temperature : 0.7,  // REDUCIDO para más consistencia
+                        num_predict: (typeof opts.max_tokens === 'number') ? opts.max_tokens : 16000,
+                        top_p: (typeof opts.top_p === 'number') ? opts.top_p : 0.9,
+                        frequency_penalty: (typeof opts.frequency_penalty === 'number') ? opts.frequency_penalty : 0.5,
+                        presence_penalty: (typeof opts.presence_penalty === 'number') ? opts.presence_penalty : 0.5
+                    }
+                };
+
+                // Intentar servidor proxy primero, luego Ollama directo
+                const urls = [
+                    'http://localhost:8765/api/chat',
+                    'http://localhost:11434/api/chat'
+                ];
+
+                let ultimoError = null;
+
+                for (const url of urls) {
+                    try {
+                        const response = await fetch(url, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(payload)
+                        });
+
+                        if (!response.ok) {
+                            let errorMsg = response.statusText;
+                            try {
+                                const errorData = await response.json();
+                                errorMsg = errorData.error || errorMsg;
+                            } catch (e) {}
+                            throw new Error(`Error: ${errorMsg}`);
+                        }
+
+                        const data = await response.json();
+                        if (!data.message || !data.message.content) {
+                            throw new Error('Respuesta inválida');
+                        }
+
+                        return data.message.content;
+                    } catch (error) {
+                        ultimoError = error;
+                        continue;
+                    }
+                }
+
+                // Si llegamos aquí, ninguna URL funcionó
+                throw new Error(
+                    '❌ No se pudo conectar a Ollama\n\n' +
+                    '💡 SOLUCIÓN:\n' +
+                    '1. Verifica que INICIAR_AQUI.bat esté corriendo\n' +
+                    '2. Prueba reinstalar el modelo:\n' +
+                    '   ollama pull llama3.2:3b\n\n' +
+                    `Detalles: ${ultimoError.message}`
+                );
+            } catch (error) {
+                console.error('💥 Error completo en llamada a Ollama:', error);
+                throw error;
+            }
+        }
+
+        // Alias para compatibilidad
+        const llamarGroqAPI = llamarOllamaAPI;
+
+
+        // ==================== GUARDAR Y CARGAR PROGRESO ====================
+        
+        // Autoguardado en localStorage
+        function autoguardarProgreso() {
+            try {
+                const datos = recolectarDatosFormulario();
+                localStorage.setItem('planeacion_progreso', JSON.stringify(datos));
+                localStorage.setItem('planeacion_fecha', new Date().toISOString());
+            } catch (e) {
+                console.error('Error en autoguardado:', e);
+            }
+        }
+
+        // Recolectar todos los datos del formulario
+        function recolectarDatosFormulario() {
+            return {
+                materia: document.getElementById('materia')?.value || '',
+                docente: document.getElementById('docente')?.value || '',
+                semestre: document.getElementById('semestre')?.value || '',
+                inicioClases: document.getElementById('inicioClases')?.value || '',
+                finClases: document.getElementById('finClases')?.value || '',
+                examen1Inicio: document.getElementById('examen1Inicio')?.value || '',
+                examen1Fin: document.getElementById('examen1Fin')?.value || '',
+                examen2Inicio: document.getElementById('examen2Inicio')?.value || '',
+                examen2Fin: document.getElementById('examen2Fin')?.value || '',
+                horasSemana: document.getElementById('horasSemana')?.value || '4',
+                suspensiones: Array.from(document.querySelectorAll('#suspensionesContainer input[type="date"]')).map(i => i.value).filter(v => v),
+                viajes: Array.from(document.querySelectorAll('#viajesContainer .viaje-item')).map(item => ({
+                    inicio: item.querySelector('input[type="date"]:first-of-type')?.value || '',
+                    fin: item.querySelector('input[type="date"]:last-of-type')?.value || '',
+                    descripcion: item.querySelector('input[type="text"]')?.value || ''
+                })).filter(v => v.inicio),
+                proyectos: Array.from(document.querySelectorAll('#proyectosContainer input[type="date"]')).map(i => i.value).filter(v => v),
+                temarioTexto: document.getElementById('temarioTexto')?.value || '',
+                unidades: obtenerUnidades()
+            };
+        }
+
+        // Guardar progreso como archivo JSON
+        function guardarProgreso() {
+            try {
+                const datos = recolectarDatosFormulario();
+                const blob = new Blob([JSON.stringify(datos, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `planeacion_progreso_${new Date().toISOString().split('T')[0]}.json`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                
+                // También guardar en localStorage
+                autoguardarProgreso();
+                
+                alert('✅ Progreso guardado correctamente\n\nSe guardó en:\n• Archivo JSON descargado\n• Navegador (autoguardado)');
+            } catch (e) {
+                console.error('Error al guardar:', e);
+                alert('❌ Error al guardar el progreso: ' + e.message);
+            }
+        }
+
+        // Cargar progreso desde archivo JSON
+        function cargarProgreso(input) {
+            const file = input.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const datos = JSON.parse(e.target.result);
+                    restaurarDatosFormulario(datos);
+                    alert('✅ Progreso cargado correctamente\n\nPuedes continuar editando y generar tu planeación.');
+                } catch (err) {
+                    console.error('Error al cargar:', err);
+                    alert('❌ Error al cargar el archivo: ' + err.message);
+                }
+            };
+            reader.readAsText(file);
+            input.value = ''; // Reset input
+        }
+
+        // Restaurar datos en el formulario
+        function restaurarDatosFormulario(datos) {
+            // Datos básicos
+            if (datos.materia) document.getElementById('materia').value = datos.materia;
+            if (datos.docente) document.getElementById('docente').value = datos.docente;
+            if (datos.semestre) document.getElementById('semestre').value = datos.semestre;
+            if (datos.inicioClases) document.getElementById('inicioClases').value = datos.inicioClases;
+            if (datos.finClases) document.getElementById('finClases').value = datos.finClases;
+            if (datos.examen1Inicio) document.getElementById('examen1Inicio').value = datos.examen1Inicio;
+            if (datos.examen1Fin) document.getElementById('examen1Fin').value = datos.examen1Fin;
+            if (datos.examen2Inicio) document.getElementById('examen2Inicio').value = datos.examen2Inicio;
+            if (datos.examen2Fin) document.getElementById('examen2Fin').value = datos.examen2Fin;
+            if (datos.horasSemana) document.getElementById('horasSemana').value = datos.horasSemana;
+            if (datos.temarioTexto) document.getElementById('temarioTexto').value = datos.temarioTexto;
+
+            // Suspensiones
+            if (datos.suspensiones && datos.suspensiones.length > 0) {
+                datos.suspensiones.forEach((fecha, idx) => {
+                    if (idx > 0) agregarSuspension();
+                    const inputs = document.querySelectorAll('#suspensionesContainer input[type="date"]');
+                    if (inputs[idx]) inputs[idx].value = fecha;
+                });
+            }
+
+            // Viajes
+            if (datos.viajes && datos.viajes.length > 0) {
+                datos.viajes.forEach((viaje, idx) => {
+                    if (idx > 0) agregarViaje();
+                    const items = document.querySelectorAll('#viajesContainer .viaje-item');
+                    if (items[idx]) {
+                        const inputs = items[idx].querySelectorAll('input');
+                        if (inputs[0]) inputs[0].value = viaje.inicio;
+                        if (inputs[1]) inputs[1].value = viaje.fin;
+                        if (inputs[2]) inputs[2].value = viaje.descripcion;
+                    }
+                });
+            }
+
+            // Proyectos
+            if (datos.proyectos && datos.proyectos.length > 0) {
+                datos.proyectos.forEach((fecha, idx) => {
+                    if (idx > 0) agregarProyecto();
+                    const inputs = document.querySelectorAll('#proyectosContainer input[type="date"]');
+                    if (inputs[idx]) inputs[idx].value = fecha;
+                });
+            }
+
+            // Unidades
+            if (datos.unidades && datos.unidades.length > 0) {
+                // Limpiar unidades existentes
+                document.getElementById('unidadesContainer').innerHTML = '';
+                datos.unidades.forEach(unidad => {
+                    agregarUnidad();
+                    const unidadItems = document.querySelectorAll('.unidad-item');
+                    const ultimaUnidad = unidadItems[unidadItems.length - 1];
+                    if (ultimaUnidad) {
+                        ultimaUnidad.querySelector('input[placeholder*="Número"]').value = unidad.numero || '';
+                        ultimaUnidad.querySelector('input[placeholder*="nombre"]').value = unidad.nombre || '';
+                        ultimaUnidad.querySelector('textarea[placeholder*="objetivo"]').value = unidad.objetivo || '';
+                        ultimaUnidad.querySelector('input[placeholder*="Temas"]').value = (unidad.temas || []).join(', ');
+                    }
+                });
+            }
+        }
+
+        // Intentar cargar autoguardado al iniciar
+        window.addEventListener('DOMContentLoaded', function() {
+            try {
+                const guardado = localStorage.getItem('planeacion_progreso');
+                const fecha = localStorage.getItem('planeacion_fecha');
+                if (guardado && fecha) {
+                    const fechaGuardado = new Date(fecha);
+                    const horasTranscurridas = (Date.now() - fechaGuardado.getTime()) / (1000 * 60 * 60);
+                    
+                    // Solo auto-restaurar si fue en las últimas 24 horas
+                    if (horasTranscurridas < 24) {
+                        if (confirm(`📋 Se encontró un progreso guardado de hace ${Math.round(horasTranscurridas)} hora(s).\n\n¿Deseas restaurarlo?`)) {
+                            const datos = JSON.parse(guardado);
+                            restaurarDatosFormulario(datos);
+                        }
+                    }
+                }
+            } catch (e) {
+                console.error('Error al cargar autoguardado:', e);
+            }
+        });
+
+        // Autoguardar cada vez que cambia un campo importante
+        window.addEventListener('DOMContentLoaded', function() {
+            const camposImportantes = [
+                'materia', 'docente', 'semestre', 'inicioClases', 'finClases',
+                'examen1Inicio', 'examen1Fin', 'examen2Inicio', 'examen2Fin',
+                'horasSemana', 'temarioTexto'
+            ];
+            
+            camposImportantes.forEach(id => {
+                const elemento = document.getElementById(id);
+                if (elemento) {
+                    elemento.addEventListener('change', autoguardarProgreso);
+                    if (elemento.tagName === 'TEXTAREA') {
+                        elemento.addEventListener('blur', autoguardarProgreso);
+                    }
+                }
+            });
+        });
+
+        
+        // ==================== VALIDACIÓN DE CALIDAD (VARIEDAD + ESPECIFICIDAD) ====================
+        function normalizarTexto(texto) {
+            return (texto || '')
+                .toString()
+                .toLowerCase()
+                .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+                .replace(/[^\w\s]/g, ' ')
+                .replace(/\s+/g, ' ')
+                .trim();
+        }
+
+        function validarContenidoUnico(sesionesIA, planVariedad = null) {
+            const errores = [];
+            const advertencias = [];
+
+            if (!Array.isArray(sesionesIA) || sesionesIA.length === 0) {
+                return { valido: false, errores: ['El contenido generado está vacío o no es un array'], advertencias: [], score: 0 };
+            }
+
+            // Asegurar campo sesion
+            sesionesIA.forEach((s, idx) => {
+                if (typeof s.sesion !== 'number') s.sesion = idx + 1;
+            });
+
+            // 1) Longitud y unicidad de temas
+            const temasNorm = sesionesIA.map(s => normalizarTexto(s.tema));
+            const temasUnicos = new Set(temasNorm.filter(Boolean));
+
+            const porcentajeUnicidad = temasNorm.length ? (temasUnicos.size / temasNorm.length) : 0;
+            if (porcentajeUnicidad < 0.9) {
+                advertencias.push(`Posibles temas repetidos: ${temasUnicos.size} temas únicos de ${temasNorm.length} sesiones.`);
+            }
+
+            // 2) Verificar cumplimiento del plan de variedad (si existe)
+            if (Array.isArray(planVariedad) && planVariedad.length === sesionesIA.length) {
+                sesionesIA.forEach((s, i) => {
+                    const plan = planVariedad[i];
+                    if ((s.tipo_actividad || '').trim() !== (plan.tipo_actividad || '').trim()) {
+                        errores.push(`Sesión ${i + 1}: tipo_actividad no coincide con el plan ("${s.tipo_actividad}" vs "${plan.tipo_actividad}")`);
+                    }
+                    if ((s.nivel_bloom || '').trim() !== (plan.nivel_bloom || '').trim()) {
+                        errores.push(`Sesión ${i + 1}: nivel_bloom no coincide con el plan ("${s.nivel_bloom}" vs "${plan.nivel_bloom}")`);
+                    }
+                });
+            } else {
+                advertencias.push('No se pudo validar el plan de variedad (longitud distinta o ausente).');
+            }
+
+            // 3) Actividades: estructura mínima y no repetición consecutiva por tipo
+            for (let i = 0; i < sesionesIA.length; i++) {
+                const s = sesionesIA[i];
+                const tipo = (s.tipo_actividad || '').trim();
+                const tipoPrev = i > 0 ? (sesionesIA[i - 1].tipo_actividad || '').trim() : null;
+                if (tipo && tipoPrev && tipo === tipoPrev) {
+                    errores.push(`Sesiones ${i} y ${i + 1}: tipo_actividad repetido consecutivamente ("${tipo}")`);
+                }
+
+                const acts = s.actividades;
+                if (!Array.isArray(acts) || acts.length !== 3) {
+                    errores.push(`Sesión ${i + 1}: "actividades" debe ser un array de 3 elementos (Inicio/Desarrollo/Cierre).`);
+                } else {
+                    const momentos = acts.map(a => normalizarTexto(a.momento));
+                    const tieneIDC = ['inicio', 'desarrollo', 'cierre'].every(m => momentos.includes(m));
+                    if (!tieneIDC) {
+                        advertencias.push(`Sesión ${i + 1}: se recomienda que los momentos sean Inicio/Desarrollo/Cierre.`);
+                    }
+                }
+
+                // Preguntas socráticas
+                if (!Array.isArray(s.preguntas_socraticas) || s.preguntas_socraticas.length < 2) {
+                    errores.push(`Sesión ${i + 1}: "preguntas_socraticas" debe tener al menos 2 preguntas.`);
+                }
+
+                // Competencia: longitud y genericidad
+                const comp = (s.competencia || '').toString();
+                if (comp.length < 90) {
+                    advertencias.push(`Sesión ${i + 1}: competencia podría ser más específica (${comp.length} caracteres).`);
+                }
+                const frasesGenericas = /(el docente explicara|revisar el tema|comprender los conceptos basicos|conocer los conceptos|ver el contenido)/i;
+                if (frasesGenericas.test(normalizarTexto(comp))) {
+                    errores.push(`Sesión ${i + 1}: competencia con frase demasiado genérica.`);
+                }
+
+                // Actividades: detectar plantillas genéricas
+                const actsText = JSON.stringify(acts || '').toLowerCase();
+                if (/el profesor|el docente|explicara|revisaran|se vera el tema/.test(actsText)) {
+                    advertencias.push(`Sesión ${i + 1}: actividades con redacción docente-céntrica; conviene hacerlas más activas.`);
+                }
+            }
+
+            // Score (0-100): penaliza errores fuerte y advertencias suave
+            let score = 100;
+            score -= errores.length * 8;
+            score -= advertencias.length * 2;
+            score -= (porcentajeUnicidad < 0.9) ? 10 : 0;
+            score = Math.max(0, Math.min(100, score));
+
+            const valido = score >= 70 && errores.length === 0;
+
+            return {
+                valido,
+                errores,
+                advertencias,
+                score,
+                metricas: {
+                    totalSesiones: sesionesIA.length,
+                    temasUnicos: temasUnicos.size,
+                    porcentajeUnicidad: Math.round(porcentajeUnicidad * 100)
+                }
+            };
+        }
+
+
+        
+        // ==================== PROCESAMIENTO DE RESPUESTA IA ====================
+        function escapeHTML(str) {
+            return (str ?? '').toString()
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function extraerArrayJSON(respuestaIA) {
+            let jsonText = (respuestaIA || '').trim();
+            console.log('🔍 Respuesta IA (primeros 300 chars):', jsonText.substring(0, 300));
+
+            // PASO 1: Remover bloques markdown
+            let cleaned = jsonText.replace(/```json\s*/gi, '').replace(/```\s*/g, '');
+            
+            // PASO 2: Buscar SOLO el array principal [...]
+            const arrayStart = cleaned.indexOf('[');
+            const arrayEnd = cleaned.lastIndexOf(']');
+            
+            if (arrayStart !== -1 && arrayEnd !== -1 && arrayEnd > arrayStart) {
+                cleaned = cleaned.substring(arrayStart, arrayEnd + 1);
+                console.log('✅ Array extraído, longitud:', cleaned.length);
+            }
+            
+            // PASO 3: Validar y limpiar caracteres problemáticos
+            try {
+                // Intentar parsear directamente
+                const parsed = JSON.parse(cleaned);
+                console.log('✅ JSON parseado exitosamente, elementos:', Array.isArray(parsed) ? parsed.length : 'objeto');
+                return Array.isArray(parsed) ? parsed : [parsed];
+            } catch (firstError) {
+                console.warn('⚠️ Primer intento falló:', firstError.message);
+                console.log('🔧 Texto que causó error (primeros 500 chars):', cleaned.substring(0, 500));
+                
+                // PASO 4: Limpieza agresiva - remover todo entre comillas que no sea JSON válido
+                try {
+                    // Buscar el patrón más común de error: texto extra en valores
+                    let fixed = cleaned;
+                    
+                    // Remover trailing commas (común con algunos modelos)
+                    fixed = fixed.replace(/,(\s*[}\]])/g, '$1');
+                    
+                    // Remover caracteres de control invisibles
+                    fixed = fixed.replace(/[\u0000-\u001F\u007F-\u009F]/g, '');
+                    
+                    // Intentar parsear la versión limpia
+                    const parsed = JSON.parse(fixed);
+                    console.log('✅ JSON parseado después de limpieza agresiva');
+                    return Array.isArray(parsed) ? parsed : [parsed];
+                } catch (secondError) {
+                    console.error('❌ FALLÓ después de limpieza:', secondError.message);
+                    console.error('❌ JSON problemático (primeros 1000 chars):', cleaned.substring(0, 1000));
+                    
+                    throw new Error(
+                        `No se pudo parsear el JSON generado por la IA.\n\n` +
+                        `Error: ${firstError.message}\n\n` +
+                        `SOLUCIÓN RÁPIDA:\n` +
+                        `1. El modelo qwen2.5:7b tiene problemas con JSON\n` +
+                        `2. Instala llama3.2:3b: ollama pull llama3.2:3b\n` +
+                        `3. Recarga la página e intenta de nuevo\n\n` +
+                        `Abre la consola (F12) para ver el JSON exacto que falló.`
+                    );
+                }
+                throw new Error(`No se pudo extraer JSON válido. Error: ${e.message}\n\nVerifica la consola (F12) para más detalles.`);
+            }
+        }
+
+        function formatearActividadesParaTabla(sesion) {
+            // Versión más concisa de las actividades para reducir páginas
+            const acts = sesion.actividades;
+            let html = '';
+
+            if (Array.isArray(acts) && acts.length) {
+                // Solo mostrar las descripciones principales sin tanto detalle
+                const actividades = acts.map(a => escapeHTML(a.descripcion || '')).filter(d => d).join('; ');
+                if (actividades) {
+                    html = `<div style="font-size:0.9em;color:#555;">${actividades}</div>`;
+                }
+            } else if (typeof acts === 'string' && acts.trim()) {
+                html = `<div style="font-size:0.9em;color:#555;">${escapeHTML(acts).replace(/\n/g, '; ')}</div>`;
+            }
+
+            return html;
+        }
+
+        function procesarRespuestaIA(sesionesIA, fechasSesiones, unidades) {
+            try {
+                // Permite pasar string (respuesta) o array (ya parseado)
+                if (typeof sesionesIA === 'string') {
+                    sesionesIA = extraerArrayJSON(sesionesIA);
+                }
+
+                if (!Array.isArray(sesionesIA)) {
+                    throw new Error('La respuesta no es un array válido');
+                }
+
+                // Ordenar por "sesion" si existe
+                sesionesIA = sesionesIA.slice().sort((a, b) => (a.sesion || 0) - (b.sesion || 0));
+
+                const planeacion = [];
+                
+                // Fechas especiales
+                const examen1Inicio = new Date(document.getElementById('examen1Inicio').value + 'T00:00:00');
+                const examen1Fin = new Date(document.getElementById('examen1Fin').value + 'T00:00:00');
+                const examen2Inicio = new Date(document.getElementById('examen2Inicio').value + 'T00:00:00');
+                const examen2Fin = new Date(document.getElementById('examen2Fin').value + 'T00:00:00');
+                const suspensiones = parsearFechas(obtenerSuspensiones());
+                const proyectos = parsearFechas(obtenerProyectos());
+                const viajesData = obtenerViajes();
+
+                // Asegurar orden de fechas de sesiones
+                const fechasSesionesOrdenadas = (fechasSesiones || []).slice().sort((a, b) => a - b);
+
+                // Procesar cada sesión de clase y agrupar sesiones consecutivas del mismo tema
+                let numeroSesion = 0;
+                let examen1Agregado = false;
+                let examen2Agregado = false;
+                const viajesAgregados = new Set();
+                const proyectosAgregados = new Set();
+
+                for (let i = 0; i < fechasSesionesOrdenadas.length; i++) {
+                    const fechaSesion = fechasSesionesOrdenadas[i];
+                    const sesion = sesionesIA[i] || {};
+                    const sesionSiguiente = sesionesIA[i + 1];
+                    
+                    // Verificar si hay eventos especiales ANTES de agregar esta sesión
+                    
+                    // 1. Período de Examen Parcial 1 - Agregar JUSTO ANTES de la primera sesión después del examen
+                    if (!examen1Agregado && fechaSesion >= examen1Inicio && fechaSesion <= examen1Fin) {
+                        // Si esta sesión cae dentro del período de examen, no agregar aún
+                        // Esperar hasta la primera sesión DESPUÉS del período
+                        continue;
+                    }
+                    
+                    if (!examen1Agregado && fechaSesion > examen1Fin) {
+                        planeacion.push({
+                            tipo: 'examen',
+                            tema: 'Preparación para primer parcial',
+                            sesiones: 1,
+                            fecha: formatearFecha(new Date(examen1Inicio.getTime() - 2 * 24 * 60 * 60 * 1000)),
+                            competencia: 'Revisarán conceptos clave y resolverán dudas para el examen.',
+                            unidad: 'Unidad 1 - 2'
+                        });
+                        planeacion.push({
+                            tipo: 'examen',
+                            tema: 'Examen y revisión Primer parcial',
+                            sesiones: 1,
+                            fecha: formatearFecha(examen1Inicio),
+                            competencia: '',
+                            unidad: ''
+                        });
+                        examen1Agregado = true;
+                    }
+
+                    // 2. Período de Examen Parcial 2
+                    if (!examen2Agregado && fechaSesion >= examen2Inicio && fechaSesion <= examen2Fin) {
+                        continue;
+                    }
+                    
+                    if (!examen2Agregado && fechaSesion > examen2Fin) {
+                        planeacion.push({
+                            tipo: 'examen',
+                            tema: 'Preparación para segundo examen parcial',
+                            sesiones: 2,
+                            fecha: formatearFecha(new Date(examen2Inicio.getTime() - 4 * 24 * 60 * 60 * 1000)),
+                            competencia: 'Revisarán proyectos y resolverán dudas para el examen.',
+                            unidad: 'Unidad 3 - 4'
+                        });
+                        planeacion.push({
+                            tipo: 'examen',
+                            tema: 'Examen Segundo parcial',
+                            sesiones: 1,
+                            fecha: formatearFecha(examen2Inicio),
+                            competencia: '',
+                            unidad: ''
+                        });
+                        planeacion.push({
+                            tipo: 'examen',
+                            tema: 'Revisión Segundo parcial',
+                            sesiones: 1,
+                            fecha: formatearFecha(new Date(examen2Inicio.getTime() + 2 * 24 * 60 * 60 * 1000)),
+                            competencia: '',
+                            unidad: ''
+                        });
+                        examen2Agregado = true;
+                    }
+
+                    // 3. Viajes de estudio - Agregar cuando corresponda cronológicamente
+                    for (const viaje of viajesData) {
+                        const vInicio = new Date(viaje.inicio + 'T00:00:00');
+                        const vFin = new Date(viaje.fin + 'T00:00:00');
+                        const viajeKey = `${viaje.inicio}-${viaje.fin}`;
+                        
+                        if (!viajesAgregados.has(viajeKey) && fechaSesion >= vInicio && !viajesAgregados.has(viajeKey)) {
+                            planeacion.push({
+                                tipo: 'viaje',
+                                tema: viaje.descripcion || 'Práctica de Campo',
+                                sesiones: 2,
+                                fecha: `${formatearFecha(vInicio)} - ${formatearFecha(vFin)}`,
+                                competencia: 'Los estudiantes saldrán a una práctica de campo y aplicarán los fundamentos aprendidos.',
+                                unidad: 'Actividad Extracurricular'
+                            });
+                            viajesAgregados.add(viajeKey);
+                        }
+                    }
+
+                    // 4. Proyectos
+                    for (const proyecto of proyectos) {
+                        const pKey = proyecto.toDateString();
+                        if (!proyectosAgregados.has(pKey) && fechaSesion.toDateString() === pKey) {
+                            planeacion.push({
+                                tipo: 'proyecto',
+                                tema: 'ENTREGA DE PROYECTO INTEGRADOR',
+                                sesiones: 1,
+                                fecha: formatearFecha(proyecto),
+                                competencia: 'Entrega y socialización de evidencias del proyecto integrador',
+                                unidad: 'Evaluación de Proyecto'
+                            });
+                            proyectosAgregados.add(pKey);
+                        }
+                    }
+
+                    // 5. Agregar la sesión regular de clase
+                    numeroSesion++;
+
+                    const unidadNum = (typeof sesion.unidad === 'number') ? sesion.unidad : parseInt(sesion.unidad, 10);
+                    let unidadTexto = '';
+                    let unidadSimple = '';
+
+                    if (!unidadNum || unidadNum === 0) {
+                        unidadTexto = 'Sesión Especial';
+                        unidadSimple = 'Especial';
+                    } else {
+                        const unidad = unidades[unidadNum - 1];
+                        if (unidad) {
+                            unidadTexto = `Unidad ${unidad.numero}. ${unidad.nombre}`;
+                            unidadSimple = `Unidad ${unidad.numero}`;
+                        } else {
+                            unidadTexto = `Unidad ${unidadNum}`;
+                            unidadSimple = `Unidad ${unidadNum}`;
+                        }
+                    }
+
+                    let tipoSesion = 'regular';
+                    const temaLower = (sesion.tema || '').toString().toLowerCase();
+                    if (numeroSesion === 1) tipoSesion = 'introduccion';
+                    else if (temaLower.includes('repaso') || temaLower.includes('preparación')) tipoSesion = 'preparacion';
+
+                    // Verificar si la siguiente sesión es del mismo tema para agrupar
+                    let numSesionesAgrupadas = 1;
+                    let fechaFin = fechaSesion;
+                    
+                    if (sesionSiguiente && sesionSiguiente.tema === sesion.tema && i + 1 < fechasSesionesOrdenadas.length) {
+                        numSesionesAgrupadas = 2;
+                        fechaFin = fechasSesionesOrdenadas[i + 1];
+                        i++; // Saltar la siguiente sesión ya que la agrupamos
+                        numeroSesion++;
+                    }
+
+                    const rangoFecha = numSesionesAgrupadas > 1 
+                        ? `${formatearFecha(fechaSesion)} - ${formatearFecha(fechaFin)}`
+                        : formatearFecha(fechaSesion);
+
+                    // Extraer subtemas de la competencia si están enumerados
+                    let competenciaLimpia = escapeHTML(sesion.competencia || '').split('\n')[0]; // Solo primera línea
+                    
+                    // Extraer subtemas del tema o de temas relacionados
+                    let subtemasTexto = '';
+                    if (sesion.subtemas && Array.isArray(sesion.subtemas)) {
+                        subtemasTexto = sesion.subtemas.slice(0, 3).map(st => escapeHTML(st)).join('\n');
+                    }
+
+                    planeacion.push({
+                        tipo: tipoSesion,
+                        tema: escapeHTML(sesion.tema || 'Tema sin definir'),
+                        sesiones: numSesionesAgrupadas,
+                        fecha: rangoFecha,
+                        competencia: competenciaLimpia,
+                        unidad: unidadTexto,
+                        unidadSimple: unidadSimple,
+                        subtemas: subtemasTexto,
+                        actividades: '' // Simplificado para reducir páginas
+                    });
+                }
+
+                return planeacion;
+
+            } catch (error) {
+                console.error('Error al procesar respuesta IA:', error);
+                throw new Error('Error al procesar la respuesta de la IA. Verifique que el formato JSON sea correcto.');
+            }
+        }
+
+
+        
+        // ==================== GENERACIÓN PRINCIPAL ====================
+        async function generarPlaneacion() {
+            try {
+                if (!validarFormulario()) return;
+
+                // Mostrar progreso
+                document.getElementById('resultSection').style.display = 'none';
+                document.getElementById('loadingOverlay').style.display = 'block';
+
+                const apiKey = document.getElementById('apiKey').value.trim();
+                // API Key no necesaria para Ollama local
+
+                // Obtener datos del formulario
+                const materia = document.getElementById('materia').value.trim();
+                const profesor = document.getElementById('docente').value.trim();
+                const grupo = '';
+                const semestre = document.getElementById('semestre').value.trim();
+                const unidadAprendizaje = materia;
+                const unidades = obtenerUnidades();
+
+                // Generar fechas de sesiones (considera horas/semana)
+                const fechasSesiones = generarFechasSesiones();
+
+                // Distribución por parcial en función del calendario
+                const distribucion = calcularDistribucionSesiones(
+                    fechasSesiones,
+                    new Date(document.getElementById('examen1Inicio').value + 'T00:00:00')
+                );
+
+                // Plan de variedad (tipo_actividad + Bloom) por sesión
+                const planVariedad = generarPlanVariedad(fechasSesiones.length, distribucion);
+
+                // Prompt base
+                const promptBase = generarPromptIA(materia, unidades, fechasSesiones.length, distribucion, planVariedad);
+
+                let sesionesIA = null;
+                let validacion = null;
+                let promptActual = promptBase;
+
+                const maxIntentos = 2;
+
+                for (let intento = 1; intento <= maxIntentos; intento++) {
+                    mostrarProgreso(`Generando planeación con IA (intento ${intento}/${maxIntentos})...`);
+
+                    const respuestaIA = await llamarGroqAPI(apiKey, promptActual, {
+                        temperature: (intento === 1) ? 0.9 : 0.6,
+                        frequency_penalty: (intento === 1) ? 0.8 : 0.6,
+                        presence_penalty: (intento === 1) ? 0.7 : 0.5
+                    });
+
+                    sesionesIA = extraerArrayJSON(respuestaIA);
+
+                    // Validación extra: longitud esperada
+                    if (Array.isArray(sesionesIA) && sesionesIA.length !== fechasSesiones.length) {
+                        validacion = { valido: false, errores: [`La IA generó ${sesionesIA.length} sesiones, pero se requieren ${fechasSesiones.length}.`], advertencias: [], score: 0 };
+                    } else {
+                        validacion = validarContenidoUnico(sesionesIA, planVariedad);
+                    }
+
+                    if (validacion.valido) break;
+
+                    // Preparar prompt de corrección para reintento
+                    if (intento < maxIntentos) {
+                        const borrador = JSON.stringify(sesionesIA, null, 2);
+                        promptActual = generarPromptCorreccion(materia, fechasSesiones.length, planVariedad, validacion, borrador);
+                    }
+                }
+
+                if (!sesionesIA || !Array.isArray(sesionesIA)) {
+                    throw new Error('La IA no devolvió un JSON válido.');
+                }
+
+                // Procesar planeación final (inserta exámenes/suspensiones/proyectos/viajes en el calendario)
+                const planeacion = procesarRespuestaIA(sesionesIA, fechasSesiones, unidades);
+
+                // Guardar datos globales
+                datosPlaneacion = {
+                    materia,
+                    profesor,
+                    grupo,
+                    semestre,
+                    unidadAprendizaje,
+                    unidades,
+                    planeacion,
+                    distribucion,
+                    fechasSesiones,
+                    planVariedad,
+                    calidad: validacion
+                };
+
+                // Mostrar resultados
+                mostrarPlaneacion();
+
+                // Ocultar loading
+                document.getElementById('loadingOverlay').style.display = 'none';
+                document.getElementById('resultSection').style.display = 'block';
+
+            } catch (error) {
+                console.error('Error al generar planeación:', error);
+                alert(`Error: ${error.message}`);
+
+                document.getElementById('loadingOverlay').style.display = 'none';
+            }
+        }
+
+
+        
+        // ==================== MOSTRAR PLANEACIÓN ====================
+        function mostrarPlaneacion() {
+            // Header
+            const headerHTML = `
+                <h2>PLANEACIÓN SEMESTRAL</h2>
+                <div class="info-grid">
+                    <div class="info-item">
+                        <span class="info-label">Materia:</span>
+                        <span class="info-value">${escapeHTML(datosPlaneacion.materia)}</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Profesor:</span>
+                        <span class="info-value">${escapeHTML(datosPlaneacion.profesor)}</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Grupo:</span>
+                        <span class="info-value">${escapeHTML(datosPlaneacion.grupo)}</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Semestre:</span>
+                        <span class="info-value">${escapeHTML(datosPlaneacion.semestre)}</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Unidad de Aprendizaje:</span>
+                        <span class="info-value">${escapeHTML(datosPlaneacion.unidadAprendizaje)}</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">Total de Sesiones:</span>
+                        <span class="info-value">${datosPlaneacion.fechasSesiones?.length || '-'}</span>
+                    </div>
+                </div>
+            `;
+
+            // Calidad (si hubo advertencias/errores)
+            let calidadHTML = '';
+            const calidad = datosPlaneacion.calidad;
+            if (calidad && ((calidad.errores && calidad.errores.length) || (calidad.advertencias && calidad.advertencias.length))) {
+                const errores = (calidad.errores || []).slice(0, 8).map(e => `<li>${escapeHTML(e)}</li>`).join('');
+                const adv = (calidad.advertencias || []).slice(0, 8).map(a => `<li>${escapeHTML(a)}</li>`).join('');
+
+                calidadHTML = `
+                    <div class="alert-warning">
+                        <strong>Revisión automática de calidad:</strong> ${calidad.score}/100
+                        ${calidad.metricas ? `<br><small>Temas únicos: ${calidad.metricas.temasUnicos}/${calidad.metricas.totalSesiones} (${calidad.metricas.porcentajeUnicidad}%)</small>` : ''}
+                        ${errores ? `<br><br><strong>Errores detectados:</strong><ul>${errores}</ul>` : ''}
+                        ${adv ? `<br><strong>Advertencias:</strong><ul>${adv}</ul>` : ''}
+                        <small>Tip: ajusta el calendario o incrementa sesiones por semana si quedan demasiados temas para pocas sesiones.</small>
+                    </div>
+                `;
+            }
+
+            document.getElementById('planeacionHeader').innerHTML = headerHTML + calidadHTML;
+
+            // Tabla
+            const filasTabla = datosPlaneacion.planeacion.map((item, index) => {
+                const rowClass = item.tipo === 'introduccion' ? 'sesion-introduccion' :
+                               item.tipo === 'preparacion' ? 'sesion-preparacion' :
+                               item.tipo === 'examen' ? 'sesion-examen' :
+                               item.tipo === 'suspension' ? 'sesion-suspension' :
+                               item.tipo === 'viaje' ? 'sesion-viaje' :
+                               item.tipo === 'proyecto' ? 'sesion-proyecto' : 'sesion-regular';
+
+                // Contenido del tema con subtemas si existen
+                let temaHTML = `<strong>${escapeHTML(item.tema)}</strong>`;
+                if (item.subtemas) {
+                    temaHTML += `<div style="font-size:0.85em;color:#666;margin-top:4px;">${item.subtemas.replace(/\n/g, '<br>')}</div>`;
+                }
+                if (item.actividades) {
+                    temaHTML += item.actividades;
+                }
+
+                // Usar unidad simple o completa según disponibilidad
+                const unidadDisplay = item.unidadSimple || item.unidad;
+
+                return `
+                    <tr class="${rowClass}">
+                        <td style="text-align:left;padding:10px 12px;">${temaHTML}</td>
+                        <td style="text-align:center;padding:10px 8px;">${item.sesiones}</td>
+                        <td style="padding:10px 12px;font-size:0.9em;">${item.fecha}</td>
+                        <td style="padding:10px 12px;font-size:0.9em;">${escapeHTML(item.competencia || '')}</td>
+                        <td style="padding:10px 12px;"><span class="unidad-badge">${escapeHTML(unidadDisplay)}</span></td>
+                    </tr>
+                `;
+            }).join('');
+
+            const tablaHTML = `
+                <table class="tabla-planeacion">
+                    <thead>
+                        <tr>
+                            <th style="width: 28%;">TEMA</th>
+                            <th style="width: 8%;">Número de Sesiones</th>
+                            <th style="width: 12%;">Fecha</th>
+                            <th style="width: 37%;">Competencia</th>
+                            <th style="width: 15%;">Unidad / Tema</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${filasTabla}
+                    </tbody>
+                </table>
+            `;
+
+            document.getElementById('planeacionTabla').innerHTML = tablaHTML;
+        }
+
+
+        // ==================== DESCARGA DE ARCHIVOS ====================
+        function descargarWord() {
+            const headerContent = document.getElementById('planeacionHeader').innerHTML;
+            const tableContent = document.getElementById('planeacionTabla').innerHTML;
+            
+            const htmlContent = `
+                <html xmlns:o='urn:schemas-microsoft-com:office:office' 
+                      xmlns:w='urn:schemas-microsoft-com:office:word' 
+                      xmlns='http://www.w3.org/TR/REC-html40'>
+                <head>
+                    <meta charset='utf-8'>
+                    <title>Planeación Didáctica - ${datosPlaneacion.materia}</title>
+                    <!--[if gte mso 9]>
+                    <xml>
+                        <w:WordDocument>
+                            <w:View>Print</w:View>
+                            <w:Zoom>100</w:Zoom>
+                        </w:WordDocument>
+                    </xml>
+                    <![endif]-->
+                    <style>
+                        @page {
+                            size: 8.5in 11in;
+                            margin: 0.5in;
+                        }
+                        body {
+                            font-family: 'Calibri', 'Arial', sans-serif;
+                            font-size: 11pt;
+                            line-height: 1.4;
+                        }
+                        h2 {
+                            color: #1e5128;
+                            text-align: center;
+                            font-size: 18pt;
+                            margin-bottom: 20px;
+                            text-transform: uppercase;
+                            border-bottom: 3px solid #4e9f3d;
+                            padding-bottom: 10px;
+                        }
+                        .info-grid {
+                            display: table;
+                            width: 100%;
+                            margin-bottom: 25px;
+                            border: 2px solid #1e5128;
+                        }
+                        .info-item {
+                            display: table-row;
+                        }
+                        .info-item strong {
+                            display: table-cell;
+                            padding: 8px 12px;
+                            background-color: #e8f5e9;
+                            color: #1e5128;
+                            font-weight: bold;
+                            width: 25%;
+                            border: 1px solid #c8e6c9;
+                        }
+                        .info-item span {
+                            display: table-cell;
+                            padding: 8px 12px;
+                            border: 1px solid #c8e6c9;
+                        }
+                        table {
+                            width: 100%;
+                            border-collapse: collapse;
+                            margin: 20px 0;
+                            page-break-inside: auto;
+                        }
+                        tr {
+                            page-break-inside: avoid;
+                            page-break-after: auto;
+                        }
+                        thead {
+                            display: table-header-group;
+                        }
+                        th {
+                            background-color: #1e5128;
+                            color: white;
+                            padding: 12px 10px;
+                            text-align: left;
+                            font-weight: bold;
+                            border: 1px solid #000;
+                            font-size: 10pt;
+                        }
+                        td {
+                            padding: 10px;
+                            border: 1px solid #000;
+                            vertical-align: top;
+                            font-size: 10pt;
+                            line-height: 1.5;
+                        }
+                        .sesion-introduccion {
+                            background-color: #e3f2fd;
+                        }
+                        .sesion-preparacion {
+                            background-color: #fff9c4;
+                            font-weight: bold;
+                        }
+                        .sesion-examen {
+                            background-color: #ffebee;
+                            font-weight: bold;
+                        }
+                        .sesion-suspension {
+                            background-color: #f3e5f5;
+                            font-style: italic;
+                        }
+                        .sesion-proyecto {
+                            background-color: #e0f2f1;
+                            font-weight: bold;
+                        }
+                        .sesion-viaje {
+                            background-color: #e8f5e9;
+                            font-weight: bold;
+                        }
+                        .tema-content strong {
+                            color: #1e5128;
+                            display: block;
+                            margin-bottom: 5px;
+                        }
+                        .actividades {
+                            color: #555;
+                            font-size: 9pt;
+                            margin-top: 5px;
+                            padding-left: 8px;
+                            border-left: 3px solid #4e9f3d;
+                        }
+                        .unidad-badge {
+                            background-color: #1e5128;
+                            color: white;
+                            padding: 3px 8px;
+                            border-radius: 3px;
+                            font-size: 9pt;
+                            font-weight: bold;
+                        }
+                    </style>
+                </head>
+                <body>
+                    <div style="text-align: center; margin-bottom: 20px;">
+                        <h1 style="color: #1e5128; font-size: 16pt; margin: 0;">UNIVERSIDAD AUTÓNOMA DEL ESTADO DE MÉXICO</h1>
+                        <p style="margin: 5px 0; font-size: 11pt;">Centro Universitario</p>
+                    </div>
+                    ${headerContent}
+                    ${tableContent}
+                    <div style="margin-top: 40px; page-break-before: avoid;">
+                        <table style="width: 100%; border: none;">
+                            <tr>
+                                <td style="border: none; text-align: center; padding-top: 30px;">
+                                    <div style="border-top: 2px solid #000; width: 300px; margin: 0 auto; padding-top: 5px;">
+                                        <strong>Elaboró:</strong><br>
+                                        ${datosPlaneacion.docente}
+                                    </div>
+                                </td>
+                                <td style="border: none; text-align: center; padding-top: 30px;">
+                                    <div style="border-top: 2px solid #000; width: 300px; margin: 0 auto; padding-top: 5px;">
+                                        <strong>Aprobó:</strong><br>
+                                        Coordinación de ${datosPlaneacion.licenciatura}
+                                    </div>
+                                </td>
+                            </tr>
+                        </table>
+                    </div>
+                </body>
+                </html>
+            `;
+
+            const blob = new Blob(['\ufeff', htmlContent], {
+                type: 'application/msword'
+            });
+
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = `Planeacion_${datosPlaneacion.materia.replace(/\s+/g, '_')}_${datosPlaneacion.semestre}.doc`;
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+            URL.revokeObjectURL(url);
+        }
+
+        function descargarPDF() {
+            window.print();
+        }
+
+        // ==================== GESTIÓN DE SUSPENSIONES ====================
+        function agregarSuspension() {
+            contadorSuspensiones++;
+            const container = document.getElementById('suspensionesContainer');
+            const div = document.createElement('div');
+            div.id = `suspension-${contadorSuspensiones}`;
+            div.style.cssText = 'display: flex; gap: 5px; align-items: center; background: #f5f5f5; padding: 8px; border-radius: 5px;';
+            div.innerHTML = `
+                <input type="date" class="fecha-suspension" style="padding: 6px; border: 1px solid #ddd; border-radius: 4px;">
+                <button type="button" onclick="eliminarSuspension(${contadorSuspensiones})" style="background: #d32f2f; color: white; border: none; padding: 6px 10px; border-radius: 4px; cursor: pointer;">✕</button>
+            `;
+            container.appendChild(div);
+        }
+
+        function eliminarSuspension(id) {
+            const elem = document.getElementById(`suspension-${id}`);
+            if (elem) elem.remove();
+        }
+
+        function obtenerSuspensiones() {
+            const fechas = [];
+            document.querySelectorAll('.fecha-suspension').forEach(input => {
+                if (input.value) fechas.push(input.value);
+            });
+            return fechas.join(',');
+        }
+
+        // ==================== GESTIÓN DE VIAJES ====================
+        function agregarViaje() {
+            contadorViajes++;
+            const container = document.getElementById('viajesContainer');
+            const div = document.createElement('div');
+            div.id = `viaje-${contadorViajes}`;
+            div.style.cssText = 'background: #e8f5e9; padding: 15px; border-radius: 8px; margin-bottom: 10px; border-left: 4px solid #43a047;';
+            div.innerHTML = `
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <strong style="color: #2e7d32;">Viaje ${contadorViajes}</strong>
+                    <button type="button" onclick="eliminarViaje(${contadorViajes})" style="background: #d32f2f; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; font-size: 0.85em;">✕ Eliminar</button>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+                    <div>
+                        <label style="display: block; margin-bottom: 5px; font-size: 0.9em; color: #1e5128;">Fecha Inicio:</label>
+                        <input type="date" class="viaje-inicio" data-viaje="${contadorViajes}" style="width: 100%; padding: 8px; border: 2px solid #4e9f3d; border-radius: 5px;">
+                    </div>
+                    <div>
+                        <label style="display: block; margin-bottom: 5px; font-size: 0.9em; color: #1e5128;">Fecha Fin:</label>
+                        <input type="date" class="viaje-fin" data-viaje="${contadorViajes}" style="width: 100%; padding: 8px; border: 2px solid #4e9f3d; border-radius: 5px;">
+                    </div>
+                </div>
+                <div style="margin-top: 10px;">
+                    <label style="display: block; margin-bottom: 5px; font-size: 0.9em; color: #1e5128;">Descripción:</label>
+                    <input type="text" class="viaje-descripcion" placeholder="Ej: Visita a empresa de TI, Congreso de Informática" style="width: 100%; padding: 8px; border: 2px solid #4e9f3d; border-radius: 5px;">
+                </div>
+            `;
+            container.appendChild(div);
+        }
+
+        function eliminarViaje(id) {
+            const elem = document.getElementById(`viaje-${id}`);
+            if (elem) elem.remove();
+        }
+
+        function obtenerViajes() {
+            const viajes = [];
+            document.querySelectorAll('[id^="viaje-"]').forEach(div => {
+                const inicio = div.querySelector('.viaje-inicio')?.value;
+                const fin = div.querySelector('.viaje-fin')?.value;
+                const desc = div.querySelector('.viaje-descripcion')?.value;
+                if (inicio && fin) {
+                    viajes.push({ inicio, fin, descripcion: desc || 'Viaje de estudio' });
+                }
+            });
+            return viajes;
+        }
+
+        // ==================== GESTIÓN DE PROYECTOS ====================
+        function agregarProyecto() {
+            contadorProyectos++;
+            const container = document.getElementById('proyectosContainer');
+            const div = document.createElement('div');
+            div.id = `proyecto-${contadorProyectos}`;
+            div.style.cssText = 'display: flex; gap: 5px; align-items: center; background: #f5f5f5; padding: 8px; border-radius: 5px;';
+            div.innerHTML = `
+                <input type="date" class="fecha-proyecto" style="padding: 6px; border: 1px solid #ddd; border-radius: 4px;">
+                <button type="button" onclick="eliminarProyecto(${contadorProyectos})" style="background: #d32f2f; color: white; border: none; padding: 6px 10px; border-radius: 4px; cursor: pointer;">✕</button>
+            `;
+            container.appendChild(div);
+        }
+
+        function eliminarProyecto(id) {
+            const elem = document.getElementById(`proyecto-${id}`);
+            if (elem) elem.remove();
+        }
+
+        function obtenerProyectos() {
+            const fechas = [];
+            document.querySelectorAll('.fecha-proyecto').forEach(input => {
+                if (input.value) fechas.push(input.value);
+            });
+            return fechas.join(',');
+        }
+
+        // ==================== PROCESAMIENTO DE TEMARIO CON IA ====================
+        function limpiarTemario() {
+            document.getElementById('temarioTexto').value = '';
+            document.getElementById('statusTemario').innerHTML = '';
+        }
+
+        async function procesarTemario() {
+            const temarioTexto = document.getElementById('temarioTexto').value.trim();
+            const statusDiv = document.getElementById('statusTemario');
+            
+            if (!temarioTexto || temarioTexto.length < 100) {
+                alert('Por favor pegue el texto del temario (mínimo 100 caracteres).\n\nAbre tu PDF, selecciona todo (Ctrl+A), copia (Ctrl+C) y pega aquí.');
+                return;
+            }
+
+            const apiKey = document.getElementById('apiKey').value.trim();
+            if (!apiKey) {
+                alert('Asegúrate de que Ollama esté ejecutándose');
+                return;
+            }
+
+            statusDiv.innerHTML = '⏳ Analizando temario con IA...';
+            statusDiv.style.color = '#0277bd';
+
+            try {
+                // Limitar texto a 12000 caracteres para evitar sobrecarga
+                const textoLimitado = temarioTexto.substring(0, 12000);
+
+                const promptAnalisis = `Analiza este programa de estudios y extrae SOLO la información de las UNIDADES TEMÁTICAS.
+
+Responde ÚNICAMENTE con JSON válido (sin texto adicional, sin marcadores de código).
+
+TEXTO DEL PROGRAMA:
+${textoLimitado}
+
+INSTRUCCIONES:
+1. Busca las UNIDADES TEMÁTICAS (generalmente son 4 unidades: 2 para el primer parcial, 2 para el segundo)
+2. Para CADA unidad extrae:
+   - Nombre completo de la unidad
+   - Objetivo específico de esa unidad
+   - Lista de TODOS los temas/subtemas de esa unidad
+
+3. Si no encuentras el número exacto de unidades, extrae las que encuentres
+4. Si encuentras más de 6 unidades, prioriza las 4 primeras
+
+Formato JSON ESTRICTO (copia este formato exacto):
+{
+  "unidades": [
+    {
+      "numero": 1,
+      "nombre": "Escribir nombre completo",
+      "objetivo": "Escribir objetivo específico completo",
+      "temas": ["Tema 1", "Tema 2", "Tema 3", "etc"]
+    },
+    {
+      "numero": 2,
+      "nombre": "...",
+      "objetivo": "...",
+      "temas": ["..."]
+    }
+  ]
+}
+
+RECUERDA: Responde SOLO con el JSON, sin explicaciones adicionales.`;
+
+                statusDiv.innerHTML = '🖥️ Procesando con Ollama local...';
+                const respuesta = await llamarGroqAPI(apiKey, promptAnalisis);
+                
+                // Limpiar respuesta de forma AGRESIVA - quitar TODO excepto el JSON
+                let jsonLimpio = respuesta.trim();
+                
+                // Remover bloques de código markdown
+                jsonLimpio = jsonLimpio.replace(/```json\s*/gi, '');
+                jsonLimpio = jsonLimpio.replace(/```\s*/g, '');
+                
+                // Encontrar el primer { y el último }
+                const primerLlave = jsonLimpio.indexOf('{');
+                const ultimaLlave = jsonLimpio.lastIndexOf('}');
+                
+                if (primerLlave !== -1 && ultimaLlave !== -1 && ultimaLlave > primerLlave) {
+                    jsonLimpio = jsonLimpio.substring(primerLlave, ultimaLlave + 1);
+                }
+                
+                // Remover cualquier texto antes o después del JSON
+                jsonLimpio = jsonLimpio.trim();
+                
+                // Buscar el objeto JSON en la respuesta
+                const jsonMatch = jsonLimpio.match(/\{[\s\S]*\}/);
+                if (jsonMatch) {
+                    jsonLimpio = jsonMatch[0];
+                }
+
+                console.log('JSON recibido:', jsonLimpio);
+                
+                let datos;
+                try {
+                    datos = JSON.parse(jsonLimpio);
+                } catch (parseError) {
+                    console.error('Error al parsear JSON:', parseError);
+                    console.error('Respuesta recibida:', respuesta);
+                    throw new Error('La IA no devolvió un JSON válido. Por favor intente nuevamente o complete las unidades manualmente.');
+                }
+
+                if (!datos.unidades || !Array.isArray(datos.unidades) || datos.unidades.length === 0) {
+                    throw new Error('No se encontraron unidades en el temario. Por favor verifique el texto pegado.');
+                }
+
+                // Limpiar unidades existentes
+                document.getElementById('unidadesContainer').innerHTML = '';
+                contadorUnidades = 0;
+
+                // Crear unidades desde el temario
+                datos.unidades.forEach((unidad, index) => {
+                    agregarUnidad();
+                    const unidadDiv = document.getElementById(`unidad-${contadorUnidades}`);
+                    
+                    unidadDiv.querySelector('.unidad-nombre').value = unidad.nombre || `Unidad ${index + 1}`;
+                    unidadDiv.querySelector('.unidad-objetivo').value = unidad.objetivo || '';
+                    
+                    const temas = Array.isArray(unidad.temas) ? unidad.temas : [];
+                    unidadDiv.querySelector('.unidad-temas').value = temas.join('\n');
+                });
+
+                statusDiv.innerHTML = `✅ ¡Éxito! ${datos.unidades.length} unidades extraídas y cargadas`;
+                statusDiv.style.color = '#2e7d32';
+
+                // Scroll a las unidades
+                setTimeout(() => {
+                    document.getElementById('unidadesContainer').scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }, 500);
+
+            } catch (error) {
+                console.error('Error completo:', error);
+                statusDiv.innerHTML = `❌ Error: ${error.message}<br><small>Revisa la consola del navegador (F12) para más detalles o completa las unidades manualmente.</small>`;
+                statusDiv.style.color = '#d32f2f';
+            }
+        }
+
+        // Función eliminada - Ya no se necesita leer archivos, ahora se usa texto directo
+
+        // ==================== UTILIDADES ====================
+        function toggleApiKey() {
+            const input = document.getElementById('apiKey');
+            const toggle = document.querySelector('.toggle-visibility');
+            
+            if (input.type === 'password') {
+                input.type = 'text';
+                toggle.textContent = '🙈';
+            } else {
+                input.type = 'password';
+                toggle.textContent = '👁️';
+            }
+        }
+
+        function nuevaPlaneacion() {
+            if (confirm('¿Está seguro de crear una nueva planeación? Se perderán los datos actuales.')) {
+                location.reload();
+            }
+        }
+    </script>
+</body>
+</html>

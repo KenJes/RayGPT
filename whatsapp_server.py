@@ -22,6 +22,7 @@ ENDPOINTS:
 import re
 import json
 import os
+import sys
 import time
 from flask import Flask, request, jsonify
 from flask_cors import CORS
@@ -29,11 +30,18 @@ import logging
 from pathlib import Path
 from dotenv import load_dotenv
 
-# Cargar variables de entorno desde .env
-load_dotenv()
-
 BASE_DIR = Path(__file__).resolve().parent
 CONFIG_DIR = BASE_DIR / "config"
+
+# Cargar variables de entorno — prioridad: config/.env, fallback raíz
+_dotenv_path = CONFIG_DIR / ".env"
+if _dotenv_path.exists():
+    load_dotenv(dotenv_path=_dotenv_path)
+else:
+    load_dotenv()
+
+os.environ.pop("GITHUB_TOKEN", None)
+os.environ.pop("GH_TOKEN", None)
 DATA_DIR = BASE_DIR / "data"
 OUTPUT_DIR = BASE_DIR / "output"
 
@@ -81,12 +89,12 @@ METRICS_FILE = DATA_DIR / 'metrics.json'
 from core.ai_clients import OllamaClient, MistralClient, GroqClient
 from core.tools import GestorHerramientas
 from core.detectors import DetectorIdioma
-from core.config import config_agente as config_agente_module
+
 from core.google_workspace_client import GoogleWorkspaceClient
 from core.metrics_tracker import MetricsTracker
 from core.audio_handler import get_audio_handler
 from core.adapters import build_registry
-from core.agent_loop import AgentLoop, es_meta_compleja
+from core.agent_loop import AgentLoop
 from core.agent_logger import AgentLogger
 from core.agent_memory import VectorMemory
 from core.approval import approval_manager
@@ -94,6 +102,7 @@ from core.conversation_db import ConversationDB
 from core.knowledge_db import KnowledgeBase
 from core.spotify_client import SpotifyClient, detect_spotify_intent
 from core.context_manager import ContextManager
+from core.agent_runtime import AgentRuntime, AgentRequest
 
 # ====================================
 # CONFIGURACIÓN DE FLASK
@@ -126,6 +135,55 @@ def generar_nombre_archivo(titulo):
     nombre = nombre.replace('-', '_')
     nombre = nombre.strip('_')
     return nombre or "archivo"
+
+
+def construir_adjunto_local(path_archivo, tipo=None, title=None):
+    """Normaliza un archivo local para respuesta JSON de WhatsApp."""
+    if not path_archivo:
+        return None
+    try:
+        resolved_path = Path(str(path_archivo)).resolve()
+    except Exception:
+        return None
+    if not resolved_path.exists() or not resolved_path.is_file():
+        return None
+    return {
+        "path": str(resolved_path),
+        "filename": resolved_path.name,
+        "tipo": tipo or resolved_path.suffix.lstrip('.') or 'archivo',
+        "title": title or resolved_path.stem,
+    }
+
+
+def normalizar_adjuntos_locales(artifacts):
+    """Filtra y deduplica adjuntos locales reales para enviar por WhatsApp."""
+    normalized = []
+    seen_paths = set()
+
+    for artifact in artifacts or []:
+        if isinstance(artifact, dict):
+            entry = construir_adjunto_local(
+                artifact.get('path'),
+                tipo=artifact.get('tipo'),
+                title=artifact.get('title') or artifact.get('filename'),
+            )
+        else:
+            entry = construir_adjunto_local(artifact)
+
+        if entry and entry['path'] not in seen_paths:
+            normalized.append(entry)
+            seen_paths.add(entry['path'])
+
+    return normalized
+
+
+def agregar_adjuntos_respuesta(response_data, archivos):
+    if not archivos:
+        return response_data
+    response_data['archivos'] = archivos
+    response_data['archivo'] = archivos[0]['path']
+    response_data['tipo_archivo'] = archivos[0]['tipo']
+    return response_data
 
 try:
     # Cargar configuración desde JSON
@@ -188,26 +246,48 @@ try:
     else:
         logger.info("⚠️ Spotify no configurado (agrega SPOTIFY_CLIENT_ID y SPOTIFY_CLIENT_SECRET en el archivo .env)")
 
-    adapter_registry = build_registry(gestor, knowledge_base=knowledge_base, spotify_client=spotify_client)
+    # Inicializar FaceManager — reconocimiento facial (opcional)
+    face_manager = None
+    try:
+        from core.face_recognition import FaceManager
+        deepface_config = config_agente.get("deepface", {})
+        face_manager = FaceManager(config=deepface_config, knowledge_base=knowledge_base)
+        if face_manager.available:
+            gestor.face_manager = face_manager
+            logger.info("✅ FaceManager inicializado (reconocimiento facial activo)")
+        else:
+            logger.info("⚠️ FaceManager creado pero modelos no disponibles")
+    except Exception as fe:
+        logger.warning(f"⚠️ No se pudo inicializar FaceManager: {fe}")
 
-    def _ai_chat_for_agent(messages, temperature=0.4, max_tokens=2000):
-        """Función de chat para el AgentLoop — Ollama primero, Groq/Mistral como refuerzo."""
-        from core.tools import es_rechazo_llm
-        # 1. Ollama local (gratis, ilimitado)
-        r = ollama.chat(messages, temperature=temperature, max_tokens=max_tokens)
-        if r and not es_rechazo_llm(r):
-            return r
-        # 2. Groq (rate limited)
-        if groq and groq.client:
-            r = groq.chat(messages, temperature=temperature, max_tokens=max_tokens)
-            if r and not es_rechazo_llm(r):
-                return r
-        # 3. Mistral (rate limited)
-        if mistral and mistral.client:
-            r = mistral.chat(messages, temperature=temperature, max_tokens=max_tokens)
-            if r and not es_rechazo_llm(r):
-                return r
-        return ""
+    # Inicializar DeepFace Worker (Python 3.12 subprocess) — análisis completo (edad/género/emoción/raza)
+    # Se inicia lazy: el worker arranca en la primera solicitud de análisis facial
+    deepface_worker = None
+    try:
+        from core.deepface_stream import _DeepFaceWorkerProxy
+        deepface_worker = _DeepFaceWorkerProxy()
+        if deepface_worker.available:
+            logger.info("✅ DeepFace worker disponible (inicio lazy al primer análisis facial)")
+        else:
+            logger.info("⚠️ DeepFace worker no disponible (Python 3.12 no encontrado)")
+            deepface_worker = None
+    except Exception as dfe:
+        logger.warning(f"⚠️ No se pudo crear DeepFace worker: {dfe}")
+
+    adapter_registry = build_registry(gestor, knowledge_base=knowledge_base, spotify_client=spotify_client, face_manager=face_manager)
+
+    from core.ai_clients import make_ai_chat_fn, GitHubCopilotClient as _CopilotCls
+    _copilot_wa = _CopilotCls(model="gpt-4o-mini")  # rápido para el loop; sin RPM limit
+    _ai_chat_for_agent = make_ai_chat_fn(
+        groq_client=groq,
+        mistral_client=mistral,
+        ollama_client=ollama,
+        copilot_client=_copilot_wa,
+        copilot_model="gpt-4o-mini",
+        compress=True,
+        compress_max_chars=10000,
+        filter_rejections=True,
+    )
 
     agent_logger = AgentLogger()
     agent_memory = VectorMemory()
@@ -240,6 +320,15 @@ except Exception as e:
 conversation_db = ConversationDB()  # data/conversaciones.db — sobrevive reinicios
 logger.info("✅ Base de datos de conversaciones inicializada (SQLite)")
 
+agent_runtime = AgentRuntime(
+    gestor=gestor,
+    agent_loop=agent_loop,
+    conversation_db=conversation_db,
+    knowledge_base=knowledge_base,
+    context_manager=context_manager,
+)
+logger.info("✅ AgentRuntime inicializado para WhatsApp")
+
 # Dict en RAM solo para cosas efímeras (idioma override por sesión)
 conversaciones = {}  # Solo para idioma_override
 
@@ -248,6 +337,17 @@ personalidades_por_usuario = {}
 
 # Nombres de contacto conocidos
 nombres_contactos = {}
+
+# ── Wizard de Planeación Didáctica (sesión independiente por usuario) ──────────
+from core.planeacion_wizard import PlaneacionWizard
+_planeacion_wizards: dict = {}
+
+def _ai_fn_planeacion(prompt: str) -> str:
+    """Llamada al LLM con tokens extra para generación del plan."""
+    try:
+        return gestor._consultar_ia(prompt, temperature=0.7, max_tokens=16000) or ""
+    except Exception:
+        return ""
 
 
 def _summarize_fn(prompt: str) -> str:
@@ -279,9 +379,9 @@ def limpiar_historial(user_id):
 
 def get_tono_usuario(user_id):
     """Devuelve el tono activo para un usuario (per-user override o global)."""
-    # En modo rAI, ignorar cualquier tono guardado — rAI es SIEMPRE agresivo
+    # En modo rAI y prepa, el MD define el tono — ignorar overrides por usuario
     from core.config import _PERSONALITY_MODE
-    if _PERSONALITY_MODE == "rai":
+    if _PERSONALITY_MODE in ("rai", "prepa"):
         return None
     if user_id in personalidades_por_usuario:
         return personalidades_por_usuario[user_id].get("tono")
@@ -349,6 +449,58 @@ def detectar_cambio_personalidad_natural(texto):
 # ====================================
 # EXTRACCIÓN DE CONOCIMIENTO DE CONVERSACIONES
 # ====================================
+
+def _generar_respuesta_facial_template(face_text: str, nombre: str, tono: str | None) -> str:
+    """
+    Genera una respuesta hilarante sobre el análisis facial SIN llamar a ningún LLM.
+    Fallback de último recurso cuando Groq/Mistral/Ollama no responden.
+    """
+    import random
+    # Extraer datos del face_text (formato: "Edad: ~26 años, Género: Hombre, Emoción: neutral, Raza/Etnia: latino/hispano")
+    edad = ""
+    genero = ""
+    emocion = ""
+    raza = ""
+    for part in face_text.split(","):
+        p = part.strip()
+        if "Edad" in p:
+            edad = p.replace("Edad:", "").strip().replace("~", "").replace(" años", "")
+        elif "Género" in p or "Genero" in p:
+            genero = p.split(":")[-1].strip()
+        elif "Emoción" in p or "Emocion" in p:
+            emocion = p.split(":")[-1].strip()
+        elif "Raza" in p or "Etnia" in p:
+            raza = p.split(":")[-1].strip()
+
+    _EMOCION_BURLA = {
+        "neutral": ["cara de que te vale todo", "cara de 'no me importa nada' nivel pro",
+                    "expresión de funcionario del IMSS"],
+        "feliz": ["sonrisa tipo comercial de detergente", "cara de que ganaste 20 pesos en la lotería"],
+        "triste": ["cara de bolero de los años 50", "expresión de perrito mojado"],
+        "enojado/a": ["cara de que le cortaron el wifi", "mirada de jefe de oficina los lunes"],
+        "sorprendido/a": ["cara de que le dijeron el precio del dólar", "expresión de abuelita en TikTok"],
+        "disgustado/a": ["cara de que olió el Metro a las 8am", "expresión de que probó el agua del garrafón"],
+        "asustado/a": ["cara de que llegó la cuenta del CFE", "expresión de tamal en microondas"],
+    }
+    burla_emo = random.choice(_EMOCION_BURLA.get(emocion.lower(), ["cara de 'me vale madre'"]))
+
+    from core.config import _get_mode
+    modo = _get_mode()
+
+    if modo == "rai" or tono == "puteado":
+        plantillas = [
+            f"Wey, la IA dice que tienes {edad} años, eres {genero} y traes {burla_emo}. No te la creo, pareces más viejo pendejo.",
+            f"Nmms, {edad} años con {burla_emo}. Y de raza {raza}. Eso explica muchas cosas que prefiero no decir.",
+            f"Te detectaron {edad} años, {burla_emo}, y {raza}. Buen trabajo DNA, la verdad.",
+        ]
+    else:
+        plantillas = [
+            f"Órale, la IA dice que tienes unos {edad} años, eres {genero} y traes {burla_emo}. Yo no dije nada, fue el algoritmo.",
+            f"Chido, {edad} años con {burla_emo}. Y lo de la raza {raza}... eso ya es tu herencia cultural, no te quejo.",
+            f"El análisis dice: {edad} años, {genero}, {burla_emo}. Qué le dices a la ciencia, wey, tiene sus razones.",
+        ]
+    return random.choice(plantillas)
+
 
 def _extraer_y_guardar_conocimiento(mensaje: str, respuesta: str, user_id: str):
     """
@@ -445,20 +597,9 @@ def _handle_spotify_command(mensaje: str) -> str | None:
             "Una vez que autorices, vuelve a enviar el comando y lo ejecuto."
         )
 
-    # Ejecutar el comando
+    # Ejecutar el comando con retry automático en 401
     try:
-        if intent == "pause":
-            return spotify_client.pause()
-        elif intent == "play" and query:
-            return spotify_client.play(query)
-        elif intent == "play":
-            return spotify_client.play()
-        elif intent == "next":
-            return spotify_client.next_track()
-        elif intent == "previous":
-            return spotify_client.previous_track()
-        elif intent == "current":
-            return spotify_client.current_track()
+        return spotify_client.execute_command(intent, query)
     except Exception as e:
         return f"❌ Error Spotify: {e}"
 
@@ -589,6 +730,9 @@ def chat():
         
         # ── Comando /reset: borrar caché de conversaciones ────────
         if mensaje.lower() in ['/reset', '/borrar', '/limpiar', '/nuevo', '/clear']:
+            # Cancelar wizard de planeación si está activo
+            if user_id in _planeacion_wizards:
+                del _planeacion_wizards[user_id]
             # 1. SQLite: mensajes + resúmenes del usuario
             limpiar_historial(user_id)
             # 2. Limpiar personalidad override del usuario
@@ -620,6 +764,23 @@ def chat():
                 "user_id": user_id
             })
 
+        # ── Wizard de Planeación Didáctica ─────────────────────────────────
+        # Interceptar mensajes cuando el usuario tiene un wizard activo
+        if user_id in _planeacion_wizards and _planeacion_wizards[user_id].is_active:
+            wizard_resp = _planeacion_wizards[user_id].step(mensaje)
+            still_active = _planeacion_wizards[user_id].is_active
+            if not still_active:
+                del _planeacion_wizards[user_id]
+            logger.info(f"🎓 {user_name or user_id} — wizard planeación")
+            return jsonify({"respuesta": wizard_resp, "user_id": user_id, "wizard_active": still_active})
+
+        # Comando /planeacion: iniciar el wizard
+        if mensaje.lower().strip() == '/planeacion':
+            wizard = PlaneacionWizard(_ai_fn_planeacion)
+            _planeacion_wizards[user_id] = wizard
+            logger.info(f"🎓 {user_name or user_id} inició wizard de planeación didáctica")
+            return jsonify({"respuesta": wizard.start(), "user_id": user_id, "wizard_active": True})
+
         # Comandos de cambio de personalidad — ahora son PER-USER
         if mensaje.lower() in ['/puteado', '/putedo', '/rai']:
             set_tono_usuario(user_id, 'puteado')
@@ -643,16 +804,19 @@ def chat():
                 "respuesta": "¡Hola! Ahora estoy en modo amigable 😊 ¿En qué puedo ayudarte?",
                 "user_id": user_id
             })
-        
+
+        if mensaje.lower() in ['/prepa', '/school', '/escuela']:
+            limpiar_historial(user_id)
+            logger.info(f"🏫 {user_name or user_id} solicitó modo PREPA")
+            return jsonify({
+                "respuesta": "Órale wey, modo prepa al cien. Sin groserías pero con actitud. ¿Qué necesitas?",
+                "user_id": user_id
+            })
+
         # Comando para personalidad en inglés
         if mensaje.lower() in ['/english', '/en', '/inglés', '/ingles']:
             # Activar personalidad en inglés (usando configuración del JSON)
-            personalidad_en = config_agente.get('personalidad_en', {})
-            tono_actual = config_agente.get('personalidad', {}).get('tono', 'puteado')
-            if tono_actual == 'puteado':
-                prompt_en = personalidad_en.get('prompt_sistema_puteado', 'You are Ray, a helpful assistant.')
-            else:
-                prompt_en = personalidad_en.get('prompt_sistema_amigable', 'You are Ray, a friendly assistant.')
+
             
             # Guardar estado de idioma para este usuario
             if 'idioma_override' not in conversaciones:
@@ -742,6 +906,72 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
         # Detectar si el usuario está siendo agresivo en ESTE mensaje (no persistente)
         usuario_agresivo = detectar_agresividad_usuario(mensaje_limpio)
 
+        # ─── COMANDO "según mi cara" sin imagen adjunta ───────────
+        # Detecta peticiones faciales sin imagen (usa último resultado del stream si está activo)
+        _segun_cara_patterns = [
+            r"seg[uú]n\s+mi\s+cara", r"bas[aá]ndote\s+en\s+mi\s+cara",
+            r"con\s+mi\s+cara",  r"por\s+mi\s+cara",
+        ]
+        _es_peticion_cara_sin_imagen = (
+            not image_base64
+            and any(re.search(p, mensaje_limpio, re.IGNORECASE) for p in _segun_cara_patterns)
+        )
+        if _es_peticion_cara_sin_imagen:
+            # Intentar leer el último resultado del DeepFaceStream (cámara activa)
+            _last_df = None
+            try:
+
+                # Acceder a la instancia global si existe en voice_assistant o similar
+                import sys as _sys
+                for _mod in list(_sys.modules.values()):
+                    if hasattr(_mod, '_face_stream') and hasattr(_mod._face_stream, 'last_result'):
+                        _last_df = _mod._face_stream.last_result
+                        break
+            except Exception:
+                pass
+
+            if _last_df and _last_df.get("ok") and _last_df.get("faces"):
+                _f = _last_df["faces"][0]
+                _GENDER_ES2 = {"Man": "Hombre", "Woman": "Mujer"}
+                _EMO_ES2 = {"happy": "feliz", "sad": "triste", "angry": "enojado/a",
+                            "surprise": "sorprendido/a", "fear": "asustado/a",
+                            "disgust": "disgustado/a", "neutral": "neutral"}
+                _RACE_ES2 = {"white": "blanco/a", "black": "negro/a", "asian": "asiático/a",
+                             "indian": "indio/a", "middle eastern": "de medio oriente",
+                             "latino hispanic": "latino/hispano"}
+                _face_txt_stream = (
+                    f"Edad: ~{_f.get('age','?')} años, "
+                    f"Género: {_GENDER_ES2.get(_f.get('gender',''), _f.get('gender','?'))}, "
+                    f"Emoción: {_EMO_ES2.get(_f.get('emotion',''), _f.get('emotion','?'))}, "
+                    f"Raza/Etnia: {_RACE_ES2.get(_f.get('race',''), _f.get('race','?'))}"
+                )
+                from core.config import config_agente as _cfg_stream
+                _sp_min = _cfg_stream.get_prompt_sistema()[:2000]
+                _sp_min += context_manager._build_tone_instruction(get_tono_usuario(user_id), usuario_agresivo)
+                if user_name and user_name != user_id:
+                    _sp_min += f"\n\nChateando con: {user_name}."
+                _stream_msg = (
+                    f"{mensaje_limpio}\n\n"
+                    f"[DATOS DEEPFACE CÁMARA]: {_face_txt_stream}\n\n"
+                    f"Responde de forma hilarante y directa sobre estos datos. Máx 3 oraciones."
+                )
+                _resp_stream = limpiar_formato_markdown(gestor.chat_hibrido(
+                    _stream_msg, history=[], system_prompt=_sp_min,
+                ))
+                agregar_mensaje(user_id, "user", mensaje_limpio)
+                agregar_mensaje(user_id, "assistant", _resp_stream)
+                return jsonify({"respuesta": _resp_stream, "user_id": user_id})
+            else:
+                # Sin datos de cámara → pedir foto
+                from core.config import _PERSONALITY_MODE as _PM_CARA
+                if _PM_CARA == 'rai':
+                    _no_cam = "wey, mándame una foto pendejo, no tengo cámara aquí, cómo quieres que vea tu cara?"
+                else:
+                    _no_cam = "Para analizar tu cara necesitas mandarme una foto. Adjunta una imagen y repite la pregunta 📸"
+                agregar_mensaje(user_id, "user", mensaje_limpio)
+                agregar_mensaje(user_id, "assistant", _no_cam)
+                return jsonify({"respuesta": _no_cam, "user_id": user_id})
+
         # ─── SPOTIFY: comandos rápidos de reproducción ────────────
         spotify_result = _handle_spotify_command(mensaje_limpio)
         if spotify_result:
@@ -753,6 +983,8 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
 
         # ─── MEDIA ADJUNTA: extraer texto (imagen o PDF) ─────────
         texto_imagen_extraido = None
+        face_analysis_text = None
+        _face_analyzed = False  # Flag para saltar AgentLoop
         if image_base64:
             tipo_media = media_mimetype or 'desconocido'
             logger.info(f"📎 [{user_name or user_id}] Media adjunta recibida ({tipo_media}), extrayendo texto...")
@@ -760,12 +992,16 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
                 texto_imagen_extraido = gestor.vision.extract_text_from_base64(image_base64, mimetype=media_mimetype)
                 if texto_imagen_extraido and not texto_imagen_extraido.startswith("❌"):
                     logger.info(f"📝 Texto extraído de imagen: {len(texto_imagen_extraido)} chars")
+                    # Cap OCR a 1500 chars para no inflar el payload del LLM
+                    _ocr_truncado = texto_imagen_extraido[:1500]
+                    if len(texto_imagen_extraido) > 1500:
+                        _ocr_truncado += "\n[...texto truncado...]"
                     mensaje_limpio = (
                         f"{mensaje_limpio}\n\n"
                         f"[CONTENIDO EXTRAÍDO DE LA IMAGEN ADJUNTA]:\n"
-                        f"{texto_imagen_extraido}"
+                        f"{_ocr_truncado}"
                     )
-                    # Guardar documento en la base de conocimiento
+                    # Guardar documento en la base de conocimiento (texto completo, sin truncar)
                     is_pdf = media_mimetype and 'pdf' in media_mimetype.lower()
                     doc_type = 'cv' if is_pdf else 'image'
                     try:
@@ -784,63 +1020,184 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
             except Exception as e:
                 logger.error(f"❌ Error extrayendo texto de imagen: {e}")
 
-        # ─── RUTA AGÉNTICA: metas complejas van al AgentLoop ──────
-        if es_meta_compleja(mensaje_limpio, usuario_agresivo=usuario_agresivo):
-            logger.info(f"🧠 [{user_name or user_id}] Meta compleja detectada → AgentLoop")
+            # ─── DeepFace: análisis facial si el mensaje lo pide ────
+            if media_mimetype and 'image' in media_mimetype.lower():
+                from core.detectors import DetectorIntenciones
+                _face_detector = DetectorIntenciones()
+                _face_score = _face_detector._contar_keywords(
+                    mensaje_limpio.lower(),
+                    DetectorIntenciones.KEYWORDS_RECONOCIMIENTO_FACIAL,
+                )
+                if _face_score >= 1:
+                    logger.info(f"👤 [{user_name or user_id}] Intent facial detectado, analizando...")
+                    _deepface_done = False
+
+                    # ── Opción 1: DeepFace worker (edad/género/emoción/raza completo) ──
+                    if deepface_worker and deepface_worker.available:
+                        try:
+                            df_result = deepface_worker.analyze_b64(image_base64)
+                            if df_result and df_result.get("ok") and df_result.get("faces"):
+                                _deepface_done = True
+                                _GENDER_ES = {"Man": "Hombre", "Woman": "Mujer"}
+                                _EMOTION_ES = {
+                                    "happy": "feliz", "sad": "triste", "angry": "enojado/a",
+                                    "surprise": "sorprendido/a", "fear": "asustado/a",
+                                    "disgust": "disgustado/a", "neutral": "neutral",
+                                    "contempt": "desprecio",
+                                }
+                                _RACE_ES = {
+                                    "white": "blanco/a", "black": "negro/a",
+                                    "asian": "asiático/a", "indian": "indio/a",
+                                    "middle eastern": "medio oriente",
+                                    "latino hispanic": "latino/hispano",
+                                }
+                                face_lines = []
+                                for i, f in enumerate(df_result["faces"], 1):
+                                    prefix = f"Rostro {i}:" if len(df_result["faces"]) > 1 else ""
+                                    parts = [
+                                        f"Edad: ~{f.get('age', '?')} años",
+                                        f"Género: {_GENDER_ES.get(f.get('gender', ''), f.get('gender', '?'))}",
+                                        f"Emoción: {_EMOTION_ES.get(f.get('emotion', ''), f.get('emotion', '?'))}",
+                                        f"Raza/Etnia: {_RACE_ES.get(f.get('race', ''), f.get('race', '?'))}",
+                                    ]
+                                    face_lines.append(f"{prefix} {', '.join(parts)}".strip())
+                                face_analysis_text = "\n".join(face_lines)
+                                mensaje_limpio = (
+                                    f"{mensaje_limpio}\n\n"
+                                    f"[ANÁLISIS FACIAL DEEPFACE — datos reales detectados]:\n"
+                                    f"{face_analysis_text}\n\n"
+                                    f"[INSTRUCCIÓN]: El usuario te pidió que analices su cara. "
+                                    f"Con base en los datos del análisis facial de arriba, "
+                                    f"hazle un comentario burlón y creativo sobre "
+                                    f"su edad, género, emoción o raza detectada. "
+                                    f"REGLAS: Menciona los datos reales detectados. "
+                                    f"Haz UNA broma ingeniosa basada en esos datos. "
+                                    f"NO repitas muletillas (nmms, wey) más de una vez. "
+                                    f"NO digas cosas sin sentido ni te inventes datos. "
+                                    f"Máximo 3 oraciones. Sé creativo y directo."
+                                )
+                                logger.info(f"👤 DeepFace worker completado: {face_analysis_text[:120]}")
+                                _face_analyzed = True
+                            elif df_result and df_result.get("ok") and not df_result.get("faces"):
+                                _deepface_done = True
+                                _face_analyzed = True
+                                mensaje_limpio = (
+                                    f"{mensaje_limpio}\n\n"
+                                    f"[ANÁLISIS FACIAL]: No se detectaron rostros en la imagen.\n"
+                                    f"[INSTRUCCIÓN]: Dile al usuario que no pudiste ver ninguna cara "
+                                    f"en la foto que mandó, y búrlate de eso."
+                                )
+                        except Exception as dfe:
+                            logger.warning(f"⚠️ Error en DeepFace worker: {dfe}")
+
+                    # ── Opción 2: Fallback a FaceManager (solo emoción) ──
+                    if not _deepface_done and face_manager and face_manager.available:
+                        try:
+                            from core.face_recognition import FaceManager
+                            face_result = face_manager.analyze(b64=image_base64)
+                            if face_result["success"]:
+                                face_analysis_text = FaceManager.format_analysis(face_result)
+                                mensaje_limpio = (
+                                    f"{mensaje_limpio}\n\n"
+                                    f"[ANÁLISIS FACIAL]:\n"
+                                    f"{face_analysis_text}\n\n"
+                                    f"[INSTRUCCIÓN]: El usuario te pidió que analices su cara. "
+                                    f"Con base en el análisis facial, hazle un comentario "
+                                    f"burlón basado en los datos reales. Máximo 3 oraciones. "
+                                    f"NO repitas muletillas, sé creativo."
+                                )
+                                _face_analyzed = True
+                        except Exception as fe:
+                            logger.warning(f"⚠️ Error en análisis facial (fallback): {fe}")
+
+        # ─── RUTA FACIAL: respuesta directa sin AgentLoop ni historial pesado ──
+        if _face_analyzed:
+            logger.info(f"👤 [{user_name or user_id}] Análisis facial completado → respuesta directa")
             try:
-                # Obtener contexto de conversación previo para el agente
-                conv_context = get_contexto_completo(user_id)
-                # Buscar conocimiento relevante en la KB (filtrado por usuario)
-                kb_context = knowledge_base.build_knowledge_context(query=mensaje_limpio, user_id=user_id)
-                resultado_agente = agent_loop.run(
-                    goal=mensaje_limpio,
-                    user_name=user_name,
-                    user_id=user_id,
-                    tono_override=get_tono_usuario(user_id),
-                    usuario_agresivo=usuario_agresivo,
-                    conversation_history=conv_context,
-                    knowledge_context=kb_context,
+                # Prompt MÍNIMO: solo personalidad (cap 2000) + tono + nombre.
+                # Sin KB, sin herramientas, sin capacidades — evita overflow 413.
+                from core.config import config_agente as _cfg_f
+                _base_pers = _cfg_f.get_prompt_sistema()[:2000]
+                _tono_instr = context_manager._build_tone_instruction(
+                    get_tono_usuario(user_id), usuario_agresivo
                 )
-                respuesta = limpiar_formato_markdown(resultado_agente["response"])
-                tiempo_respuesta = time.time() - tiempo_inicio
+                _face_system = _base_pers + _tono_instr
+                if user_name and user_name != user_id:
+                    _face_system += f"\n\nChateando con: {user_name}."
 
-                # Guardar en BD persistente
-                agregar_mensaje(user_id, "user", mensaje_limpio)
-                agregar_mensaje(user_id, "assistant", respuesta)
+                # Mensaje compacto: SOLO datos deepface + petición original.
+                # NO incluir OCR completo (puede ser miles de chars).
+                _original_req = mensaje or ""
+                if face_analysis_text:
+                    _face_user_msg = (
+                        f"{_original_req}\n\n"
+                        f"[ANÁLISIS DEEPFACE]: {face_analysis_text}\n\n"
+                        f"Hazme un comentario burlón y creativo sobre lo que detectaste. "
+                        f"Máximo 3 oraciones, sé directo e hilarante."
+                    )
+                else:
+                    _face_user_msg = (
+                        f"{_original_req}\n\n"
+                        f"[ANÁLISIS FACIAL]: No se detectaron rostros en la imagen. "
+                        f"Dile al usuario que no pudiste ver ninguna cara y búrlate."
+                    )
 
-                # Extraer y guardar datos de personas mencionadas
-                _extraer_y_guardar_conocimiento(mensaje_limpio, respuesta, user_id)
+                # Intentar con gemma2-9b-it (15k TPM) o cualquier modelo disponible
+                _face_messages = [
+                    {"role": "system", "content": _face_system},
+                    {"role": "user", "content": _face_user_msg},
+                ]
+                respuesta = None
+                # 1) Groq con gemma2-9b-it (15,000 TPM vs 6,000 de llama-3.1-8b-instant)
+                if gestor.groq_client and gestor.groq_client.client:
+                    _r = gestor.groq_client.chat(
+                        _face_messages, temperature=0.8, max_tokens=400,
+                        model_override="gemma2-9b-it",
+                    )
+                    from core.tools import es_rechazo_llm, _es_rechazo_rai
+                    if _r and not es_rechazo_llm(_r) and not _es_rechazo_rai(_r):
+                        respuesta = _r
+                # 2) Groq con modelo default (por si gemma2 también falla)
+                if not respuesta and gestor.groq_client and gestor.groq_client.client:
+                    _r = gestor.groq_client.chat(_face_messages, temperature=0.8, max_tokens=400)
+                    if _r and not es_rechazo_llm(_r) and not _es_rechazo_rai(_r):
+                        respuesta = _r
+                # 3) Mistral fallback
+                if not respuesta and gestor.mistral and gestor.mistral.client:
+                    _r = gestor.mistral.chat(_face_messages, temperature=0.8, max_tokens=400)
+                    if _r and not es_rechazo_llm(_r) and not _es_rechazo_rai(_r):
+                        respuesta = _r
+                # 4) Ollama local
+                if not respuesta:
+                    _r = gestor.ollama.chat(_face_messages, temperature=0.8, max_tokens=400)
+                    if _r and not es_rechazo_llm(_r):
+                        respuesta = _r
+                # 5) Template sin LLM — siempre funciona
+                if not respuesta and face_analysis_text:
+                    respuesta = _generar_respuesta_facial_template(
+                        face_analysis_text, user_name or "amigo",
+                        get_tono_usuario(user_id)
+                    )
+                if not respuesta:
+                    respuesta = "Nmms, no pude ver bien tu cara. Intenta con mejor foto."
+                respuesta = limpiar_formato_markdown(respuesta)
+            except Exception as face_llm_err:
+                logger.warning(f"⚠️ Error LLM en análisis facial: {face_llm_err}")
+                if face_analysis_text:
+                    respuesta = _generar_respuesta_facial_template(
+                        face_analysis_text, user_name or "amigo",
+                        get_tono_usuario(user_id)
+                    )
+                else:
+                    respuesta = "No pude generar el comentario sobre tu cara, intenta de nuevo."
 
-                # Rastrear métricas
-                tokens_groq = groq.last_tokens_used if groq and groq.client else 0
-                tokens_mistral = mistral.last_tokens_used
-                tokens_ollama = ollama.last_tokens_used
-                modelo = "groq" if tokens_groq > 0 else "mistral" if tokens_mistral > 0 else "ollama"
-                metrics.track_request(
-                    tipo="agent_loop",
-                    tokens_used=tokens_groq or tokens_mistral or tokens_ollama,
-                    modelo=modelo,
-                    tiempo_respuesta=tiempo_respuesta,
-                    user_id=user_id,
-                )
+            logger.info(f"✅ Respuesta facial generada ({len(respuesta)} chars)")
+            agregar_mensaje(user_id, "user", mensaje_limpio)
+            agregar_mensaje(user_id, "assistant", respuesta)
+            _extraer_y_guardar_conocimiento(mensaje_limpio, respuesta, user_id)
+            return jsonify({"respuesta": respuesta, "user_id": user_id})
 
-                logger.info(
-                    f"✅ AgentLoop completado — {resultado_agente['steps_taken']} pasos, "
-                    f"{len(respuesta)} chars, {tiempo_respuesta:.2f}s"
-                )
-                return jsonify({
-                    "respuesta": respuesta,
-                    "user_id": user_id,
-                    "agentic": True,
-                    "steps": resultado_agente["steps_taken"],
-                    "run_id": resultado_agente["run_id"],
-                })
-            except Exception as e:
-                logger.error(f"❌ Error en AgentLoop: {e}")
-                # Fallback al flujo clásico si el loop falla
-                logger.info("🔄 Fallback al flujo clásico...")
-
-        # ─── RUTA CLÁSICA: chat directo o herramientas simples ────
+        # ─── RUTA DIRECTA: herramientas/exportación del canal ─────
         # Procesar mensaje (detectar intención, aprender vocabulario internamente)
         resultado_herramienta = gestor.procesar_mensaje(
             mensaje_limpio,
@@ -876,6 +1233,7 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
 
             respuesta = limpiar_formato_markdown(resultado_herramienta['resultado'])
             archivo_info = resultado_herramienta.get('archivo')
+            imagen_path = resultado_herramienta.get('imagen_path')
             
             # Si hay un archivo adjunto, exportarlo
             archivo_path = None
@@ -971,36 +1329,34 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
             }
             
             # Solo agregar campos de archivo si existen
+            adjuntos_locales = []
             if archivo_path:
-                response_data["archivo"] = archivo_path
-                response_data["tipo_archivo"] = archivo_info.get('tipo') if archivo_info else None
+                adjuntos_locales.append(
+                    construir_adjunto_local(
+                        archivo_path,
+                        tipo=archivo_info.get('tipo') if archivo_info else None,
+                        title=archivo_info.get('titulo') if archivo_info else None,
+                    )
+                )
+            if imagen_path:
+                adjuntos_locales.append(construir_adjunto_local(imagen_path))
+            if adjuntos_locales:
+                archivos = normalizar_adjuntos_locales(adjuntos_locales)
+                agregar_adjuntos_respuesta(response_data, archivos)
             
             return jsonify(response_data)
         else:
-            # Usar chat híbrido normal con soporte bilingüe + ContextManager
-            idioma_override = conversaciones.get('idioma_override', {}).get(user_id)
-            idioma = idioma_override or 'es'
-            # Obtener historial completo (resúmenes + mensajes recientes)
-            conv_context = get_contexto_completo(user_id)
-            # Construir system prompt enriquecido con ContextManager
-            system_prompt = context_manager.build_system_prompt(
-                user_id=user_id,
-                user_name=user_name,
-                query=mensaje_limpio,
-                tono_override=get_tono_usuario(user_id),
-                usuario_agresivo=usuario_agresivo,
-                idioma=idioma,
+            resultado_runtime = agent_runtime.handle_text(
+                AgentRequest(
+                    text=mensaje_limpio,
+                    user_id=user_id,
+                    user_name=user_name,
+                    channel="whatsapp",
+                    tono_override=get_tono_usuario(user_id),
+                    usuario_agresivo=usuario_agresivo,
+                )
             )
-            respuesta = limpiar_formato_markdown(gestor.chat_hibrido(
-                mensaje_limpio,
-                idioma_override=idioma_override,
-                user_name=user_name,
-                user_id=user_id,
-                tono_override=get_tono_usuario(user_id),
-                usuario_agresivo=usuario_agresivo,
-                history=conv_context,
-                system_prompt=system_prompt,
-            ))
+            respuesta = limpiar_formato_markdown(resultado_runtime.response)
             
             # Calcular tiempo de respuesta
             tiempo_respuesta = time.time() - tiempo_inicio
@@ -1037,18 +1393,22 @@ Raymundo cambió automáticamente a **Ollama (local)** y seguirá funcionando si
             
             logger.info(f"✅ Respuesta generada ({len(respuesta)} caracteres)")
             logger.info(f"   • Tiempo: {tiempo_respuesta:.2f}s | Groq: {tokens_groq} | Mistral: {tokens_mistral} | Ollama: {tokens_ollama}")
-            
-            # Guardar en BD persistente
-            agregar_mensaje(user_id, "user", mensaje_limpio)
-            agregar_mensaje(user_id, "assistant", respuesta)
 
             # Extraer y guardar datos de personas mencionadas
             _extraer_y_guardar_conocimiento(mensaje_limpio, respuesta, user_id)
 
-            return jsonify({
+            response_data = {
                 "respuesta": respuesta,
-                "user_id": user_id
-            })
+                "user_id": user_id,
+                "agentic": resultado_runtime.used_agent_loop,
+                "steps": resultado_runtime.steps_taken,
+                "run_id": resultado_runtime.run_id,
+            }
+            agregar_adjuntos_respuesta(
+                response_data,
+                normalizar_adjuntos_locales(resultado_runtime.artifacts),
+            )
+            return jsonify(response_data)
         
     except Exception as e:
         logger.error(f"❌ Error procesando mensaje: {e}")
@@ -1321,37 +1681,21 @@ def audio_chat():
         logger.info(f"📝 Texto: {texto[:50]}...")
         
         # 2. Procesar mensaje con Raymundo
-        resultado_herramienta = gestor.procesar_mensaje(texto)
+        resultado_herramienta = gestor.procesar_mensaje(texto, user_id=user_id)
         
         if resultado_herramienta['ejecuto_herramienta']:
             respuesta = resultado_herramienta['resultado']
-        else:
-            # Chat normal with bilingual routing — usar historial persistente
-            conv_context = get_contexto_completo(user_id)
-            
-            # Detectar idioma para seleccionar prompt
-            idioma_override = conversaciones.get('idioma_override', {}).get(user_id)
-            idioma = idioma_override or detector_idioma.detectar(texto)
-            
-            if idioma == 'en':
-                personalidad_en = config_agente.get('personalidad_en', {})
-                tono = config_agente.get('personalidad', {}).get('tono', 'puteado')
-                if tono == 'puteado':
-                    prompt_sistema = personalidad_en.get('prompt_sistema_puteado', 'You are Ray.')
-                else:
-                    prompt_sistema = personalidad_en.get('prompt_sistema_amigable', 'You are Ray.')
-            else:
-                prompt_sistema = config_agente.get('personalidad', {}).get('prompt_sistema', '')
-            
-            messages = [{"role": "system", "content": prompt_sistema}]
-            messages.extend(conv_context)
-            messages.append({"role": "user", "content": texto})
-            
-            respuesta_ai = groq.chat(messages) or mistral.chat(messages) or ollama.generate(prompt_sistema + "\n\n" + texto)
-            respuesta = respuesta_ai or "No pude generar una respuesta"
-            
             agregar_mensaje(user_id, "user", texto)
             agregar_mensaje(user_id, "assistant", respuesta)
+        else:
+            resultado_runtime = agent_runtime.handle_text(
+                AgentRequest(
+                    text=texto,
+                    user_id=user_id,
+                    channel="whatsapp",
+                )
+            )
+            respuesta = limpiar_formato_markdown(resultado_runtime.response)
         
         logger.info(f"💬 Respuesta: {respuesta[:50]}...")
         
@@ -1423,6 +1767,17 @@ def internal_error(error):
 # ====================================
 
 if __name__ == '__main__':
+    import atexit
+
+    def _cleanup_deepface_worker():
+        if deepface_worker:
+            try:
+                deepface_worker.stop()
+            except Exception:
+                pass
+
+    atexit.register(_cleanup_deepface_worker)
+
     # ⚠️ SYNC: Copiar token.json a data/ (necesario para Google APIs)
     import shutil
     from pathlib import Path

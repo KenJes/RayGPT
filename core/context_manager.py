@@ -148,8 +148,8 @@ class ContextManager:
         """Genera la instrucción de tono según el override y agresividad."""
         mode = _get_mode()
 
-        # rAI es SIEMPRE agresivo — no necesita instrucción extra
-        if mode == "rai":
+        # rAI y prepa definen su tono desde el MD — no inyectar instrucciones extras
+        if mode in ("rai", "prepa"):
             return ""
 
         if tono_override == "amigable":

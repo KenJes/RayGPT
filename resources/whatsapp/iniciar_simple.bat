@@ -10,6 +10,10 @@ echo.
 echo 🚀 Iniciando servicios...
 echo.
 
+REM Evitar que tokens GitHub heredados bloqueen gh auth login / Copilot CLI
+set GITHUB_TOKEN=
+set GH_TOKEN=
+
 REM Iniciar servidor Python
 start "Servidor Python" cmd /k "color 0B && python whatsapp_server.py"
 

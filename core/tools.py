@@ -13,6 +13,7 @@ from core.detectors import DetectorIntenciones, DetectorTemporalidad, DetectorId
 from core.processors import VisionProcessor, DocumentProcessor, EmojiProcessor
 from core.memory import MemorySystem
 from core.web_scraper import WebScraper
+from core.extra_tools import WeatherClient, CryptoClient, QRGenerator, ImageGenerator, NasaClient, ComfyUIClient
 
 # ── Detección de rechazos del LLM ─────────────────────────────
 _REFUSAL_PATTERNS = [
@@ -59,7 +60,11 @@ def es_rechazo_llm(texto: str | None) -> bool:
 
 
 def _es_rechazo_rai(texto: str | None) -> bool:
-    """Detecta cuando un modelo ignoró la personalidad rAI y respondió corporativo/amigable."""
+    """Detecta cuando un modelo ignoró la personalidad rAI y respondió corporativo/amigable.
+    Solo aplica en modo rAI — en Raymundo/prepa esas frases son respuestas VÁLIDAS."""
+    from core.config import _get_mode
+    if _get_mode() != "rai":
+        return False
     if not texto:
         return False
     frag = texto[:400].lower()
@@ -105,11 +110,13 @@ def _es_rechazo_rai(texto: str | None) -> bool:
 class GestorHerramientas:
     """Orquesta todas las herramientas del agente."""
 
-    def __init__(self, ollama, mistral, google=None, groq=None):
+    def __init__(self, ollama, mistral, google=None, groq=None, spotify=None, copilot=None):
         self.ollama = ollama
         self.mistral = mistral
         self.groq_client = groq
+        self.copilot = copilot
         self.google = google
+        self.spotify = spotify
         self.detector = DetectorIntenciones()
         self.detector_temporal = DetectorTemporalidad()
         self.detector_idioma = DetectorIdioma()
@@ -118,6 +125,15 @@ class GestorHerramientas:
         self.memory = MemorySystem()
         self.scraper = WebScraper()
         self.emoji_processor = EmojiProcessor()
+        self.face_manager = None  # Se inicializa externamente si DeepFace está disponible
+        self.deepface_client = None  # _DeepFaceWorkerProxy, asignado desde raymundo.py
+        # ── Herramientas extra (sin API key) ──────────────────
+        self.weather   = WeatherClient()
+        self.crypto    = CryptoClient()
+        self.qr_gen    = QRGenerator()
+        self.img_gen   = ImageGenerator()
+        self.nasa      = NasaClient()
+        self.comfyui   = ComfyUIClient()
 
     # ───── Punto de entrada principal ─────────────────────────
 
@@ -133,6 +149,55 @@ class GestorHerramientas:
         if cmd:
             return cmd
 
+        # 0a. Spotify — check prioritario antes del detector de intenciones
+        #     para evitar que "pon música en Spotify" active el calendario
+        if self.spotify and self.spotify.is_authenticated:
+            from core.spotify_client import detect_spotify_intent
+            _s_intent, _s_query = detect_spotify_intent(mensaje.lower().strip())
+            if _s_intent:
+                resultado_sp = self.spotify.execute_command(_s_intent, _s_query)
+                return {
+                    "ejecuto_herramienta": True,
+                    "tipo": "spotify",
+                    "resultado": resultado_sp or "✅ Comando de Spotify ejecutado.",
+                }
+        elif self.spotify and not self.spotify.is_authenticated:
+            # Spotify configurado pero sin token — verificar si el mensaje es de Spotify
+            from core.spotify_client import detect_spotify_intent
+            _s_intent, _ = detect_spotify_intent(mensaje.lower().strip())
+            if _s_intent:
+                return {
+                    "ejecuto_herramienta": True,
+                    "tipo": "spotify",
+                    "resultado": (
+                        "🎵 Spotify no está autorizado todavía.\n\n"
+                        "Para conectarlo:\n"
+                        "1. Inicia el servidor: `python whatsapp_server.py`\n"
+                        "2. Abre en tu navegador: http://localhost:5000/spotify/auth\n"
+                        "3. Autoriza la app en Spotify\n"
+                        "4. Reinicia Raymundo\n\n"
+                        "Si ya lo autorizaste antes, revisa que `data/spotify_token.json` exista."
+                    ),
+                }
+        else:
+            # Spotify no configurado — check igualmente para dar mensaje claro
+            from core.spotify_client import detect_spotify_intent
+            _s_intent, _ = detect_spotify_intent(mensaje.lower().strip())
+            if _s_intent:
+                return {
+                    "ejecuto_herramienta": True,
+                    "tipo": "spotify",
+                    "resultado": (
+                        "🎵 Spotify no está configurado.\n\n"
+                        "Agrega tus credenciales en `config_agente.json`:\n"
+                        "```json\n\"spotify\": {\n"
+                        "  \"client_id\": \"TU_CLIENT_ID\",\n"
+                        "  \"client_secret\": \"TU_CLIENT_SECRET\",\n"
+                        "  \"redirect_uri\": \"http://localhost:5000/spotify/callback\"\n}\n```\n"
+                        "Crea la app en https://developer.spotify.com/dashboard"
+                    ),
+                }
+
         # 0b. AgentField — delegar si los agentes están corriendo
         if af_delegar and af_disponible and af_disponible():
             af_res = af_delegar(mensaje)
@@ -140,7 +205,7 @@ class GestorHerramientas:
                 texto = af_res.get("resultado", "")
                 url = af_res.get("url")
                 agente = af_res.get("agente_usado", "agente")
-                skill = af_res.get("skill_usado", "")
+
                 if url:
                     texto = f"{texto}\n\n🔗 {url}"
                 return {
@@ -209,6 +274,28 @@ class GestorHerramientas:
                             "resultado": f"🖼️ **{Path(path).name}**\n\n{resultado}",
                         }
 
+            if intencion == "reconocimiento_facial":
+                if self._tiene_ruta_archivo(mensaje):
+                    path = self._extraer_ruta(mensaje)
+                    if Path(path).exists():
+                        # Prefer DeepFace worker if available
+                        if self.deepface_client and getattr(self.deepface_client, 'available', False):
+                            res = self.gestionar_deepface(mensaje, path)
+                            return {
+                                "ejecuto_herramienta": True,
+                                "tipo": "reconocimiento_facial",
+                                "resultado": res,
+                            }
+                        elif hasattr(self, 'face_manager') and self.face_manager:
+                            from core.face_recognition import FaceManager
+                            result = self.face_manager.analyze(path=path)
+                            texto = FaceManager.format_analysis(result)
+                            return {
+                                "ejecuto_herramienta": True,
+                                "tipo": "reconocimiento_facial",
+                                "resultado": f"👤 **Análisis facial:**\n\n{texto}",
+                            }
+
             if intencion == "analisis_documento":
                 if self._tiene_ruta_archivo(mensaje_procesado):
                     path = self._extraer_ruta(mensaje_procesado)
@@ -231,6 +318,24 @@ class GestorHerramientas:
                         "tipo": "web_scraping",
                         "resultado": res_web,
                     }
+                else:
+                    # Sin URL explícita: verificar si la consulta es demasiado vaga
+                    _query_limpia = re.sub(
+                        r"\b(busca|buscar|investiga|dime|qué\s+es|que\s+es|cuéntame|cuentame|información\s+sobre|informacion\s+sobre)\b",
+                        "", mensaje_procesado, flags=re.IGNORECASE,
+                    ).strip().strip("?.,")
+                    if len(_query_limpia) < 12:
+                        return {
+                            "ejecuto_herramienta": True,
+                            "tipo": "web_scraping",
+                            "resultado": (
+                                f"🔍 ¿Qué específicamente quieres que busque?\n\n"
+                                f"Escríbeme algo más detallado, por ejemplo:\n"
+                                f"• *\"Busca los mejores restaurantes en CDMX\"*\n"
+                                f"• *\"Información sobre el volcán Popocatépetl\"*\n"
+                                f"• *\"Qué es la inteligencia artificial\"*"
+                            ),
+                        }
 
             if intencion == "calendario" and self.google:
                 res = self.gestionar_calendario(mensaje_procesado)
@@ -245,6 +350,68 @@ class GestorHerramientas:
                 return {
                     "ejecuto_herramienta": True,
                     "tipo": "youtube",
+                    "resultado": res,
+                }
+
+            if intencion == "clima":
+                res = self.gestionar_clima(mensaje_procesado)
+                return {
+                    "ejecuto_herramienta": True,
+                    "tipo": "clima",
+                    "resultado": res,
+                }
+
+            if intencion == "crypto":
+                res = self.gestionar_crypto(mensaje_procesado)
+                return {
+                    "ejecuto_herramienta": True,
+                    "tipo": "crypto",
+                    "resultado": res,
+                }
+
+            if intencion == "generar_imagen":
+                res = self.generar_imagen_ia(mensaje_procesado)
+                return {
+                    "ejecuto_herramienta": True,
+                    "tipo": "generar_imagen",
+                    "resultado": res.get("texto", ""),
+                    "imagen_path": res.get("path"),
+                }
+
+            if intencion == "qr":
+                res = self.generar_qr(mensaje_procesado)
+                return {
+                    "ejecuto_herramienta": True,
+                    "tipo": "qr",
+                    "resultado": res.get("texto", ""),
+                    "imagen_path": res.get("path"),
+                }
+
+            if intencion == "nasa":
+                res = self.gestionar_nasa(mensaje_procesado)
+                texto = res if isinstance(res, str) else res.get("texto", "")
+                path  = None if isinstance(res, str) else res.get("path")
+                return {
+                    "ejecuto_herramienta": True,
+                    "tipo": "nasa",
+                    "resultado": texto,
+                    "imagen_path": path,
+                }
+
+            if intencion == "comfyui":
+                res = self.generar_imagen_comfyui(mensaje_procesado)
+                return {
+                    "ejecuto_herramienta": True,
+                    "tipo": "comfyui",
+                    "resultado": res.get("texto", ""),
+                    "imagen_path": res.get("path"),
+                }
+
+            if intencion == "correo" and self.google:
+                res = self.gestionar_correo(mensaje_procesado)
+                return {
+                    "ejecuto_herramienta": True,
+                    "tipo": "correo",
                     "resultado": res,
                 }
 
@@ -387,7 +554,12 @@ Sin markdown extra, sin explicaciones fuera del JSON."""
             if doc:
                 return {
                     "texto": f"✅ Documento creado\n\n🔗 **URL**: {doc['url']}",
-                    "archivo": {"document_id": doc["id"], "tipo": "documento"},
+                    "archivo": {
+                        "document_id": doc["id"],
+                        "titulo": doc.get("titulo", f"{tema} - Documento"),
+                        "url": doc.get("url"),
+                        "tipo": "documento",
+                    },
                 }
             return {"texto": "❌ Error al crear documento", "archivo": None}
         except Exception as e:
@@ -401,7 +573,12 @@ Sin markdown extra, sin explicaciones fuera del JSON."""
             if sheet:
                 return {
                     "texto": f"✅ Hoja de cálculo creada\n\n🔗 **URL**: {sheet['url']}",
-                    "archivo": {"spreadsheet_id": sheet["id"], "tipo": "hoja_calculo"},
+                    "archivo": {
+                        "spreadsheet_id": sheet["id"],
+                        "titulo": sheet.get("titulo", f"{tema} - Datos"),
+                        "url": sheet.get("url"),
+                        "tipo": "hoja_calculo",
+                    },
                 }
             return {"texto": "❌ Error al crear hoja de cálculo", "archivo": None}
         except Exception as e:
@@ -485,6 +662,40 @@ Sin markdown extra, sin explicaciones fuera del JSON."""
         )
 
         if "crear" in accion:
+            # ── Verificar si hay suficiente información temporal ──────
+            #    Si el usuario no indicó fecha/hora, preguntar antes de crear
+            _ref_temporal = re.compile(
+                r"\b(\d{1,2}[\s:/\-]\d{1,2}|\d{1,2}\s*(?:am|pm|hrs?|horas?)"
+                r"|hoy|mañana|pasado\s*mañana|lunes|martes|mi[eé]rcoles|jueves|viernes"
+                r"|s[aá]bado|domingo|esta\s+(?:tarde|noche|semana|semana)"
+                r"|la\s+semana\s+que\s+viene|pr[oó]xim[ao]|el\s+d[ií]a\s+\d"
+                r"|\d{1,2}\s+de\s+(?:enero|febrero|marzo|abril|mayo|junio"
+                r"|julio|agosto|septiembre|octubre|noviembre|diciembre))\b",
+                re.IGNORECASE,
+            )
+            tiene_referencia_temporal = bool(_ref_temporal.search(mensaje))
+
+            if not tiene_referencia_temporal:
+                # Extraer título tentativo para hacer la pregunta más natural
+                _titulo_prompt = (
+                    "En 4 palabras o menos, di el nombre del evento que quiere crear. "
+                    "Solo el nombre, sin explicaciones. "
+                    "Mensaje: " + mensaje
+                )
+                try:
+                    titulo_tentativo = self._consultar_ia(_titulo_prompt, temperature=0.1, max_tokens=15).strip().strip('"')
+                except Exception:
+                    titulo_tentativo = "este evento"
+                print(f"📅 Sin referencia temporal → preguntando detalles para: {titulo_tentativo}")
+                return (
+                    f"📅 Claro, te agendo **{titulo_tentativo}**. "
+                    f"Para que no haya errores, dime:\n\n"
+                    f"• **¿Qué día?** (ej: mañana, el lunes, 20 de mayo)\n"
+                    f"• **¿A qué hora?** (ej: 3pm, 15:00 hrs)\n"
+                    f"• **¿Cuánto dura?** (opcional, default 1 hora)\n"
+                    f"• **¿Dónde?** (opcional)"
+                )
+
             prompt_crear = (
                 f"EXTRAE DATOS DE CALENDARIO EN ESPAÑOL.\n"
                 f"{contexto_fechas}"
@@ -590,6 +801,375 @@ Sin markdown extra, sin explicaciones fuera del JSON."""
         "oHg5SJYRHA0",  # RickRoll alternativo
         "eBGIQ7ZuuiU",  # Charlie Bit My Finger
     }
+
+    def gestionar_clima(self, mensaje):
+        """Consulta el clima con Open-Meteo (sin API key) — gratis y siempre disponible."""
+        _ciudad_re = re.compile(
+            r"(?:en|de|del?\s+clima\s+de|tiempo\s+en|temperatura\s+en|clima\s+en)\s+"
+            r"([A-Za-záéíóúÁÉÍÓÚñÑüÜ][A-Za-záéíóúÁÉÍÓÚñÑüÜ\s]{1,40}?)(?:\s*\?|$|\.|,)",
+            re.IGNORECASE,
+        )
+        m = _ciudad_re.search(mensaje)
+        ciudad = m.group(1).strip() if m else None
+
+        if not ciudad:
+            return (
+                "🌤️ ¿En qué ciudad quieres que revise el clima?\n\n"
+                "Escríbeme algo como: *¿Cómo está el clima en Monterrey?*"
+            )
+
+        return self.weather.get_current(ciudad)
+
+    # ─── Crypto ────────────────────────────────────────────────
+
+    def gestionar_crypto(self, mensaje: str) -> str:
+        """Consulta precio de criptomonedas con CoinGecko (sin API key)."""
+        msg = mensaje.lower()
+
+        # ¿Quiere el top / ranking?
+        if any(k in msg for k in ("top", "ranking", "mejores", "market", "mercado", "lista")):
+            n_match = re.search(r"\b(\d+)\b", mensaje)
+            n = int(n_match.group(1)) if n_match else 10
+            return self.crypto.get_top(n)
+
+        # Extraer nombre de cripto del mensaje
+        _KNOWN = [
+            "bitcoin", "btc", "ethereum", "eth", "solana", "sol",
+            "dogecoin", "doge", "cardano", "ada", "xrp", "ripple",
+            "litecoin", "ltc", "avalanche", "avax", "chainlink", "link",
+            "polygon", "matic", "tron", "trx", "bnb", "binance",
+            "tether", "usdt", "usd coin", "usdc", "shiba", "shib",
+            "pepe", "sui",
+        ]
+        moneda = None
+        for k in _KNOWN:
+            if k in msg:
+                moneda = k
+                break
+
+        if not moneda:
+            # Fallback: pedir al usuario que especifique
+            return (
+                "₿ ¿Qué criptomoneda quieres consultar?\n\n"
+                "Ejemplos:\n"
+                "• *¿Cuánto vale Bitcoin?*\n"
+                "• *¿Cómo está Ethereum hoy?*\n"
+                "• *Muéstrame el top 10 de criptos*"
+            )
+
+        return self.crypto.get_price(moneda)
+
+    # ─── Generación de imágenes IA ─────────────────────────────
+
+    def generar_imagen_ia(self, mensaje: str) -> dict:
+        """Genera una imagen con Pollinations.ai (sin API key)."""
+        # Extraer el prompt real: quitar verbos de comando
+        prompt = re.sub(
+            r"^(?:genera(?:me)?|crea(?:me)?|hazme|dibuja(?:me)?|ilustra(?:me)?"
+            r"|visualiza|muéstrame|muestrame)\s+(?:una?\s+)?(?:imagen|foto|dibujo|ilustración"
+            r"|ilustracion|arte)?\s*(?:de|con|sobre)?\s*",
+            "",
+            mensaje,
+            flags=re.IGNORECASE,
+        ).strip()
+
+        if not prompt or len(prompt) < 3:
+            return {
+                "path": None,
+                "texto": (
+                    "🎨 ¿Qué imagen quieres que genere?\n\n"
+                    "Ejemplos:\n"
+                    "• *Genera una imagen de un dragón en el espacio*\n"
+                    "• *Dibuja un paisaje de montañas al atardecer*\n"
+                    "• *Crea arte de un robot tocando guitarra*"
+                ),
+            }
+
+        return self.img_gen.generate(prompt)
+
+    # ─── Códigos QR ────────────────────────────────────────────
+
+    def generar_qr(self, mensaje: str) -> dict:
+        """Genera un código QR del contenido solicitado."""
+        # Extraer el contenido del QR
+        _qr_re = re.compile(
+            r"(?:qr\s+de|qr\s+para|qr\s+con|código\s+qr\s+de|codigo\s+qr\s+de"
+            r"|genera\s+(?:un\s+)?(?:código\s+)?qr\s+(?:de|para))\s+(.+)",
+            re.IGNORECASE,
+        )
+        m = _qr_re.search(mensaje)
+        contenido = m.group(1).strip() if m else None
+
+        # Si no encontró un patrón claro, busca URLs o texto directamente
+        if not contenido:
+            url_m = re.search(r"https?://[^\s]+", mensaje)
+            contenido = url_m.group(0) if url_m else None
+
+        if not contenido:
+            # Fallback: usar todo el mensaje sin los verbos de comando
+            contenido = re.sub(
+                r"^(?:genera(?:me)?|crea(?:me)?|hazme|haz)\s+(?:un\s+)?(?:c[oó]digo\s+)?qr\s*",
+                "",
+                mensaje,
+                flags=re.IGNORECASE,
+            ).strip()
+
+        if not contenido or len(contenido) < 2:
+            return {
+                "path": None,
+                "texto": (
+                    "📲 ¿Para qué contenido quieres el QR?\n\n"
+                    "Ejemplos:\n"
+                    "• *Genera un QR de https://axoloit.com*\n"
+                    "• *Crea un QR con el texto: Hola Mundo*\n"
+                    "• *QR para mi número: +52 55 1234 5678*"
+                ),
+            }
+
+        return self.qr_gen.generate(contenido)
+
+    # ─── NASA ──────────────────────────────────────────────────
+
+    def gestionar_nasa(self, mensaje: str) -> dict | str:
+        """Foto del día NASA o asteroides cercanos."""
+        msg = mensaje.lower()
+        if any(k in msg for k in ("asteroide", "objeto cercano", "peligro", "neo", "impacto")):
+            return self.nasa.neo()
+        return self.nasa.apod()
+
+    # ─── ComfyUI ───────────────────────────────────────────────
+
+    def generar_imagen_comfyui(self, mensaje: str) -> dict:
+        """Genera una imagen con ComfyUI local (Stable Diffusion)."""
+        prompt = re.sub(
+            r"^(?:genera(?:me)?|crea(?:me)?|hazme|dibuja(?:me)?"
+            r"|genera\s+con\s+comfyui|usa\s+comfyui"
+            r"|stable\s+diffusion|comfyui\s*:?)\s*"
+            r"(?:una?\s+)?(?:imagen|foto|dibujo|ilustraci[oó]n|arte)?\s*"
+            r"(?:de|con|sobre)?\s*",
+            "",
+            mensaje,
+            flags=re.IGNORECASE,
+        ).strip()
+
+        if not prompt or len(prompt) < 3:
+            running = self.comfyui.is_available()
+            estado  = "✅ ComfyUI detectado y corriendo" if running else "⚠️ ComfyUI no detectado (¿está iniciado?)"
+            return {
+                "path": None,
+                "texto": (
+                    f"🎭 **Generación con ComfyUI** — {estado}\n\n"
+                    "¿Qué quieres generar?\n\n"
+                    "Ejemplos:\n"
+                    "• *Genera con ComfyUI un castillo medieval al atardecer*\n"
+                    "• *Stable Diffusion: retrato de un astronauta*\n"
+                    "• *ComfyUI: paisaje de montañas con niebla*"
+                ),
+            }
+
+        return self.comfyui.generate(prompt)
+
+    def gestionar_correo(self, mensaje):
+        """Lee o envía correos con Gmail."""
+        if not self.google or not getattr(self.google, "gmail_service", None):
+            return (
+                "📧 Gmail no está disponible todavía.\n\n"
+                "Para activarlo:\n"
+                "1. Habilita la Gmail API en Google Cloud Console para tu proyecto\n"
+                "2. Elimina data/token.json\n"
+                "3. Ejecuta: python resources/scripts/autorizar_google.py\n"
+                "4. Reinicia Raymundo"
+            )
+
+        msg_lower = mensaje.lower()
+
+        # ── ¿ENVIAR? ──────────────────────────────────────────
+        _enviar_kw = re.compile(
+            r"\b(envi[aá]|manda|mandar|enviar|escr[ií]be|redacta)\b.*\b(correo|email|mail)\b"
+            r"|\b(correo|email|mail)\b.*\b(a|para)\b",
+            re.IGNORECASE,
+        )
+        if _enviar_kw.search(mensaje):
+            # Extraer destinatario (email o nombre)
+            _dest_re = re.compile(
+                r"\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b"
+            )
+            dest_match = _dest_re.search(mensaje)
+            destinatario = dest_match.group(0) if dest_match else None
+
+            if not destinatario:
+                return (
+                    "📧 Claro, te ayudo a enviar el correo. Necesito un par de datos:\n\n"
+                    "• ¿A qué dirección de correo? (ej: nombre@dominio.com)\n"
+                    "• ¿Cuál es el asunto?\n"
+                    "• ¿Qué quieres escribir en el cuerpo del mensaje?"
+                )
+
+            # Extraer asunto (busca "sobre ...", "asunto ...", o usa la IA)
+            _asunto_re = re.compile(r"\b(?:asunto|sobre|tema)\s*:?\s*(.+?)(?:\.|,|$)", re.IGNORECASE)
+            asunto_match = _asunto_re.search(mensaje)
+            if asunto_match:
+                asunto = asunto_match.group(1).strip()
+            else:
+                asunto = self._consultar_ia(
+                    f"Extrae el asunto del correo en máximo 10 palabras. "
+                    f"Si no hay asunto claro escribe 'Mensaje de Raymundo'. "
+                    f"Solo devuelve el asunto, sin explicaciones. Mensaje: {mensaje}",
+                    temperature=0.0, max_tokens=40,
+                ).strip().strip('"\'')
+
+            # El cuerpo es todo el mensaje; la IA redacta uno profesional
+            cuerpo = self._consultar_ia(
+                f"Redacta el cuerpo de un correo electrónico profesional y claro en español "
+                f"basado en esta instrucción del usuario: '{mensaje}'. "
+                f"Solo incluye el cuerpo (sin asunto, sin encabezado, sin firma). "
+                f"Máximo 200 palabras.",
+                temperature=0.5, max_tokens=400,
+            ).strip()
+
+            ok = self.google.enviar_correo(destinatario, asunto, cuerpo)
+            if ok:
+                return (
+                    f"✅ Correo enviado a {destinatario}\n"
+                    f"📌 Asunto: {asunto}\n\n"
+                    f"📝 Contenido:\n{cuerpo}"
+                )
+            return f"❌ No se pudo enviar el correo a {destinatario}. Revisa la conexión con Gmail."
+
+        # ── LEER (default) ─────────────────────────────────────
+        solo_no_leidos = any(k in msg_lower for k in (
+            "no leído", "no leidos", "no leido", "sin leer", "nuevos", "no leídos"
+        ))
+        correos = self.google.listar_correos_recientes(max_results=6, solo_no_leidos=solo_no_leidos)
+
+        if correos is None:
+            return (
+                "📧 Gmail no conectado. Habilita la Gmail API y re-autoriza con:\n"
+                "python resources/scripts/autorizar_google.py"
+            )
+        if not correos:
+            estado = "no leídos" if solo_no_leidos else "recientes"
+            return f"📭 No tienes correos {estado} en tu bandeja."
+
+        tipo = "sin leer" if solo_no_leidos else "recientes"
+        resp = f"📧 Tus correos {tipo}:\n\n"
+        for i, c in enumerate(correos, 1):
+            icono = "🔵" if c["no_leido"] else "⚪"
+            resp += f"{icono} {i}. {c['asunto']}\n"
+            resp += f"   De: {c['de']}\n"
+            if c["fragmento"]:
+                fragmento = c["fragmento"][:100]
+                resp += f"   {fragmento}...\n" if len(c["fragmento"]) > 100 else f"   {fragmento}\n"
+            resp += "\n"
+        return resp.strip()
+
+    # ─────────────────────────────────────────────────────────────
+    # DeepFace — análisis, verificación y extracción de rostros
+    # ─────────────────────────────────────────────────────────────
+    _TRADUCCIONES_EMOCION = {
+        "happy": "feliz", "sad": "triste", "angry": "enojado",
+        "surprise": "sorpresa", "fear": "miedo", "disgust": "asco",
+        "neutral": "neutral",
+    }
+    _TRADUCCIONES_GENERO = {"Man": "Hombre", "Woman": "Mujer"}
+    _TRADUCCIONES_RAZA = {
+        "asian": "asiático", "latino hispanic": "latino",
+        "white": "blanco", "black": "negro", "middle eastern": "árabe",
+        "indian": "indio",
+    }
+
+    def gestionar_deepface(self, mensaje: str, image_path: str) -> str:
+        """Dispatcher: analiza, verifica o extrae rostros usando DeepFace."""
+        if not self.deepface_client or not getattr(self.deepface_client, 'available', False):
+            return (
+                "🤖 DeepFace no está disponible.\n\n"
+                "Para habilitarlo necesitas:\n"
+                "1. Python 3.12 en `.venv312` con deepface instalado\n"
+                "2. `pip install deepface tensorflow`"
+            )
+
+        # Lazy-start del worker
+        if not self.deepface_client._ready and not self.deepface_client._process:
+            if not self.deepface_client.start():
+                return "❌ No se pudo iniciar el worker de DeepFace. Revisa que Python 3.12 esté disponible."
+
+        msg_lower = mensaje.lower()
+
+        # ── VERIFICACIÓN (¿son la misma persona?) ────────────────
+        is_verify = any(k in msg_lower for k in (
+            "verific", "compara", "misma persona", "son iguales",
+            "es el mismo", "es la misma", "misma identidad",
+        ))
+        if is_verify:
+            # Intentar extraer una segunda ruta del mensaje
+            rutas = re.findall(r'["\']?([A-Za-z]:[\\\\/][^\s"\'>]+|/[^\s"\'>]+)["\']?', mensaje)
+            if len(rutas) >= 2:
+                res = self.deepface_client.verify(rutas[0], rutas[1])
+                if not res:
+                    return "❌ No se pudo verificar la identidad. Revisa que ambas imágenes sean legibles."
+                igual = "✅ Sí" if res["verified"] else "❌ No"
+                return (
+                    f"🔍 **Verificación de identidad**\n\n"
+                    f"{igual}, parecen {'la misma persona' if res['verified'] else 'personas distintas'}\n"
+                    f"Distancia facial: {res['distance']:.3f} (umbral: {res['threshold']:.3f})\n"
+                    f"Modelo: {res['model']}"
+                )
+            return (
+                "🔍 Para comparar dos personas necesito dos imágenes.\n"
+                "Adjunta o menciona la ruta de ambas imágenes."
+            )
+
+        # ── EXTRACCIÓN / CONTEO DE ROSTROS ───────────────────────
+        is_extract = any(k in msg_lower for k in (
+            "cuántos rostros", "cuantos rostros", "cuántas personas", "cuantas personas",
+            "extrae rostros", "cuenta los rostros", "cuántas caras", "cuantas caras",
+        ))
+        if is_extract:
+            res = self.deepface_client.extract_faces(image_path)
+            if not res:
+                return "❌ No se pudo extraer rostros. Revisa que la imagen sea legible."
+            n = res.get("count", 0)
+            if n == 0:
+                return "😶 No se detectaron rostros en la imagen."
+            plural = "rostros" if n != 1 else "rostro"
+            resp = f"👥 Se detectaron **{n} {plural}** en la imagen.\n\n"
+            for i, f in enumerate(res.get("faces", []), 1):
+                conf = f.get("confidence", 0)
+                area = f.get("area", {})
+                resp += f"• Rostro {i}: confianza {conf:.1%}"
+                if area:
+                    resp += f", posición (x={area.get('x',0)}, y={area.get('y',0)}, w={area.get('w',0)}, h={area.get('h',0)})"
+                resp += "\n"
+            return resp.strip()
+
+        # ── ANÁLISIS GENERAL (default) ───────────────────────────
+        res = self.deepface_client.analyze(image_path)
+        if not res:
+            return "❌ No se pudo analizar la imagen. Asegúrate de que muestre un rostro."
+
+        faces = res.get("faces", [])
+        if not faces:
+            return "😶 No se detectaron rostros en la imagen."
+
+        resp = f"🧠 **Análisis facial** — {len(faces)} rostro(s) detectado(s)\n\n"
+        for i, f in enumerate(faces, 1):
+            genero_en = f.get("gender", "Unknown")
+            genero = self._TRADUCCIONES_GENERO.get(genero_en, genero_en)
+            emocion_en = f.get("emotion", "neutral")
+            emocion = self._TRADUCCIONES_EMOCION.get(emocion_en, emocion_en)
+            raza_en = f.get("race", "unknown").lower()
+            raza = self._TRADUCCIONES_RAZA.get(raza_en, raza_en)
+            edad = f.get("age", "?")
+            g_conf = f.get("gender_confidence", 0)
+            e_conf = f.get("emotion_confidence", 0)
+
+            resp += f"**Persona {i}:**\n"
+            resp += f"• Edad estimada: {edad} años\n"
+            resp += f"• Género: {genero} ({g_conf:.0f}%)\n"
+            resp += f"• Emoción: {emocion} ({e_conf:.0f}%)\n"
+            resp += f"• Etnia estimada: {raza}\n\n"
+
+        return resp.strip()
 
     def gestionar_youtube(self, mensaje):
         if not self.google or not hasattr(self.google, 'youtube_service'):
@@ -728,19 +1308,55 @@ Sin markdown extra, sin explicaciones fuera del JSON."""
             if knowledge_context:
                 prompt_sistema += f"\n\n{knowledge_context}"
 
+            prompt_sistema += (
+                "\n\nINSTRUCCIÓN DE RESPUESTA: Si el usuario pide una práctica guiada, tutorial, "
+                "ejemplo, plan o paso a paso, entrega una primera versión completa y útil de inmediato. "
+                "Haz supuestos razonables explícitos y solo pide aclaraciones si falta un dato realmente "
+                "bloqueante para continuar."
+            )
+
         # Construir messages con historial de conversación
         messages = [{"role": "system", "content": prompt_sistema}]
         if history:
             messages.extend(history)
         messages.append({"role": "user", "content": mensaje})
 
-        temporalidad = self.detector_temporal.detectar(mensaje)
 
-        # Groq primero (rápido, gratis 14400 RPD), Ollama como fallback
-        if self.groq_client and self.groq_client.client:
-            r = self.groq_client.chat(messages, temperature=0.7)
+
+        # Comprimir antes de enviar a nube para evitar 413
+        try:
+            from core.ai_clients import EdgeRouter as _ER
+            messages_cloud = _ER.compress_messages(messages, max_chars=12000)
+            complexity = _ER.classify(messages)
+        except Exception:
+            messages_cloud = messages
+            complexity = "medium"
+
+        # 1. Consultas simples → modelo local (sin gastar tokens de API)
+        if complexity == "simple":
+            r = self.ollama.chat(messages, temperature=0.7, max_tokens=2000)
             if r and not es_rechazo_llm(r) and not _es_rechazo_rai(r):
                 return r
+
+        # 2. GitHub Copilot — modelo seleccionado en la GUI
+        if self.copilot and self.copilot.available:
+            r = self.copilot.chat(messages_cloud, temperature=0.7, max_tokens=4000)
+            if r and not es_rechazo_llm(r) and not _es_rechazo_rai(r):
+                return r
+
+        # 3. Groq — rápido, gratis 14400 RPD
+        if self.groq_client and self.groq_client.client:
+            r = self.groq_client.chat(messages_cloud, temperature=0.7)
+            if r and not es_rechazo_llm(r) and not _es_rechazo_rai(r):
+                return r
+
+        # 4. Mistral — fallback nube (cuando Groq falla o da 413)
+        if self.mistral and self.mistral.client:
+            r = self.mistral.chat(messages_cloud, temperature=0.7)
+            if r and not es_rechazo_llm(r) and not _es_rechazo_rai(r):
+                return r
+
+        # 5. Ollama local — fallback final
         r = self.ollama.chat(messages, temperature=0.7, max_tokens=2000)
         if r and not es_rechazo_llm(r) and not _es_rechazo_rai(r):
             return r
@@ -767,6 +1383,10 @@ Sin markdown extra, sin explicaciones fuera del JSON."""
 
     def _consultar_ia(self, prompt, temperature=0.7, max_tokens=2000):
         messages = [{"role": "user", "content": prompt}]
+        if self.copilot and self.copilot.available:
+            r = self.copilot.chat(messages, temperature=temperature, max_tokens=max_tokens)
+            if r:
+                return r
         if self.groq_client and self.groq_client.client:
             r = self.groq_client.chat(messages, temperature=temperature, max_tokens=max_tokens)
             if r:
@@ -876,7 +1496,15 @@ Sin markdown extra, sin explicaciones fuera del JSON."""
 💻 `/codigo <descripción>` — Genera código con explicación
 🔄 `/puteado` · `/amigable` — Cambiar personalidad
 🗑️ `/reset` — Borrar historial y empezar de cero
-❓ `/ayuda` — Este menú"""
+❓ `/ayuda` — Este menú
+
+🌟 **Nuevas funciones (sin API key):**
+🌤️ *¿Cómo está el clima en [ciudad]?* — Open-Meteo, siempre gratis
+₿ *¿Cuánto vale Bitcoin?* — Precios crypto en tiempo real (CoinGecko)
+🎨 *Genera una imagen de [descripción]* — IA generativa (Pollinations.ai)
+📲 *Genera un QR de [URL o texto]* — Código QR instantáneo
+🔭 *Foto del día de la NASA* — APOD con imagen descargada
+☄️ *¿Hay asteroides hoy?* — Near Earth Objects de NASA"""
 
     # ───── Helpers internos ────────────────────────────────────
 

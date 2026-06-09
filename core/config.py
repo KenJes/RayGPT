@@ -18,10 +18,13 @@ RESOURCES_DIR = BASE_DIR / "resources"
 # Selección de personalidad via variable de entorno PERSONALITY_MODE
 # "raymundo" (default) = agente profesional de Axoloit
 # "rai"                = compa agresivo, déspota y chistoso
+# "prepa"              = agresivo-limpio sin groserías (demo en preparatoria)
 # Leído aquí solo como fallback; la función _get_mode() lo lee en cada llamada.
 _PERSONALITY_MODE = os.environ.get("PERSONALITY_MODE", "raymundo").lower().strip()
 if _PERSONALITY_MODE == "rai":
     PERSONALITY_FILE = DATA_DIR / "personalidad_rai.md"
+elif _PERSONALITY_MODE == "prepa":
+    PERSONALITY_FILE = DATA_DIR / "personalidad_prepa.md"
 else:
     PERSONALITY_FILE = DATA_DIR / "personalidad_raymundo.md"
 
@@ -36,6 +39,11 @@ if _dotenv_path.exists():
 else:
     load_dotenv()
 
+# `gh auth login` y Copilot CLI usan sus propias credenciales; no deben heredar
+# overrides de GITHUB_TOKEN/GH_TOKEN cargados desde .env.
+os.environ.pop("GITHUB_TOKEN", None)
+os.environ.pop("GH_TOKEN", None)
+
 
 # ═══════════════════════════════════════════════════════════════
 # ConfigAgente
@@ -48,7 +56,12 @@ def _get_mode() -> str:
 
 def _get_personality_file() -> Path:
     """Devuelve el Path del archivo de personalidad correcto según el modo actual."""
-    return DATA_DIR / ("personalidad_rai.md" if _get_mode() == "rai" else "personalidad_raymundo.md")
+    mode = _get_mode()
+    if mode == "rai":
+        return DATA_DIR / "personalidad_rai.md"
+    elif mode == "prepa":
+        return DATA_DIR / "personalidad_prepa.md"
+    return DATA_DIR / "personalidad_raymundo.md"
 
 
 def _load_personality_file() -> str | None:

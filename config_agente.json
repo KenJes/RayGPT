@@ -1,6 +1,6 @@
 {
   "personalidad": {
-    "nombre": "Raymundo",
+    "nombre": "RAIGPT",
     "tono": "amigable"
   },
   "agente": {
@@ -10,13 +10,27 @@
   },
   "modelos": {
     "ollama": {
-      "modelo": "llama3.1:8b",
+      "modelo": "qwen3.5:9b",
       "temperatura_default": 0.6,
-      "temperatura_optimizacion": 0.2
+      "temperatura_optimizacion": 0.2,
+      "nota": "Modelos compatibles con RTX 5050 8GB: qwen3.5:9b (recomendado, inteligencia=32), gemma4:e4b-it (~5GB Q4, inteligencia=19), qwen3.5:4b (ultrarapido, inteligencia=27)"
     },
     "mistral": {
       "temperatura": 0.7
     }
+  },
+  "edge_ai": {
+    "habilitado": true,
+    "cache_ttl_segundos": 300,
+    "cache_max_entradas": 200,
+    "compresion_contexto_max_chars": 12000,
+    "routing": {
+      "simple_umbral_chars": 60,
+      "medium_umbral_chars": 120,
+      "historial_medium_chars": 4000,
+      "historial_complex_chars": 10000
+    },
+    "descripcion": "Edge-first routing: Local(simple,0 tokens cloud) → Groq(medium,gratis) → Mistral(complex) → Local(fallback)"
   },
   "presentaciones": {
     "num_slides_default": 9,
@@ -36,5 +50,11 @@
     "client_id": "",
     "client_secret": "",
     "redirect_uri": "http://127.0.0.1:5000/spotify/callback"
+  },
+  "deepface": {
+    "distance_metric": "cosine",
+    "anti_spoofing": true,
+    "face_db_path": "data/face_db",
+    "models_path": "data/face_models"
   }
 }

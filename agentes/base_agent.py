@@ -25,6 +25,9 @@ if dotenv_path.exists():
 else:
     load_dotenv()
 
+os.environ.pop("GITHUB_TOKEN", None)
+os.environ.pop("GH_TOKEN", None)
+
 # ── Re-exportar clientes desde core/ ──────────────────────────
 from core.ai_clients import OllamaClient, MistralClient, GroqClient, llamar_ia  # noqa: E402
 from core.web_scraper import WebScraper  # noqa: E402

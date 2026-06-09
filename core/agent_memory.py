@@ -122,7 +122,7 @@ class VectorMemory:
         self._rebuild_idf()
         self._save()
 
-    def retrieve(self, query: str, k: int = 5, min_score: float = 0.05) -> list[dict]:
+    def retrieve(self, query: str, k: int = 5, min_score: float = 0.1) -> list[dict]:
         """
         Recupera los k documentos más relevantes para la query.
         Retorna lista de {"text", "metadata", "score", "timestamp"}.

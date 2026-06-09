@@ -91,7 +91,14 @@ def detect_spotify_intent(t: str) -> tuple[str | None, str]:
         query = m.group(1).strip()
         query = _SUFFIX_RE.sub("", query).strip()
         if query:
-            return ("play", query)
+            # Evitar falso positivo con comandos de calendario/agenda
+            _CALENDAR_POISON = re.compile(
+                r"\b(calendario|agenda|cita|reuni[oó]n|junta|evento|recordatorio"
+                r"|en\s+el\s+calendario|en\s+mi\s+agenda)\b",
+                re.IGNORECASE,
+            )
+            if not _CALENDAR_POISON.search(query):
+                return ("play", query)
 
     return (None, "")
 
@@ -139,19 +146,30 @@ class SpotifyClient:
     # ─── Autenticación ────────────────────────────────────────
 
     def _try_load_token(self):
-        """Intenta cargar token guardado y crear cliente."""
+        """Crea el cliente con auth_manager para que spotipy renueve tokens automáticamente."""
         token_info = self._oauth.cache_handler.get_cached_token()
-        if token_info:
-            # Renovar si expiró
-            if self._oauth.is_token_expired(token_info):
-                try:
-                    token_info = self._oauth.refresh_access_token(token_info["refresh_token"])
-                except Exception as e:
-                    logger.warning(f"⚠️ No se pudo renovar token de Spotify: {e}")
-                    self._sp = None
-                    return
-            self._sp = spotipy.Spotify(auth=token_info["access_token"])
-            logger.info("✅ Spotify conectado (token cargado)")
+        if not token_info:
+            return
+
+        # Usar auth_manager — spotipy renueva el access_token solo en cada llamada
+        self._sp = spotipy.Spotify(auth_manager=self._oauth)
+
+        # Validar que hay conectividad real
+        try:
+            self._sp.current_playback()
+            logger.info("✅ Spotify conectado (auth_manager activo)")
+            self._load_recent_context()
+        except spotipy.SpotifyException as e:
+            if e.http_status == 401:
+                # refresh_token revocado — necesita re-autorizar manualmente
+                logger.warning("⚠️ Spotify 401 al validar — re-autoriza en http://localhost:5000/spotify/auth")
+                self._sp = None
+            else:
+                # Sin dispositivo activo u otro error no-auth — token válido
+                logger.info(f"✅ Spotify conectado (error no-auth ignorado: {e.http_status})")
+                self._load_recent_context()
+        except Exception:
+            logger.info("✅ Spotify conectado (sin red al validar, auth_manager activo)")
             self._load_recent_context()
 
     @property
@@ -165,8 +183,8 @@ class SpotifyClient:
     def handle_callback(self, code: str) -> bool:
         """Procesa el callback de Spotify con el authorization code."""
         try:
-            token_info = self._oauth.get_access_token(code, as_dict=True)
-            self._sp = spotipy.Spotify(auth=token_info["access_token"])
+            self._oauth.get_access_token(code, as_dict=True)
+            self._sp = spotipy.Spotify(auth_manager=self._oauth)
             logger.info("✅ Spotify autenticado exitosamente")
             self._load_recent_context()
             return True
@@ -175,15 +193,51 @@ class SpotifyClient:
             return False
 
     def _ensure_auth(self) -> spotipy.Spotify:
-        """Verifica autenticación y renueva token si es necesario."""
+        """Devuelve el cliente Spotify. auth_manager renueva el token automáticamente."""
         if not self._sp:
             raise RuntimeError("Spotify no está autenticado. Visita /spotify/auth")
-        # Verificar si el token expiró
-        token_info = self._oauth.cache_handler.get_cached_token()
-        if token_info and self._oauth.is_token_expired(token_info):
-            token_info = self._oauth.refresh_access_token(token_info["refresh_token"])
-            self._sp = spotipy.Spotify(auth=token_info["access_token"])
         return self._sp
+
+    def execute_command(self, intent: str, query: str = "") -> str:
+        """Ejecuta un comando Spotify. En 401, fuerza refresh y reintenta una vez."""
+        def _dispatch():
+            if intent == "pause":
+                return self.pause()
+            elif intent == "play" and query:
+                return self.play(query)
+            elif intent == "play":
+                return self.play()
+            elif intent == "next":
+                return self.next_track()
+            elif intent == "previous":
+                return self.previous_track()
+            elif intent == "current":
+                return self.current_track()
+            return None
+
+        try:
+            return _dispatch()
+        except spotipy.SpotifyException as e:
+            if e.http_status == 401:
+                # El access_token fue revocado por Spotify (sin cambiar expires_at local).
+                # auth_manager no lo detecta solo — forzar refresh con el refresh_token.
+                logger.info("🔄 Spotify 401 — access_token revocado, forzando refresh...")
+                try:
+                    token_info = self._oauth.cache_handler.get_cached_token()
+                    if token_info and token_info.get("refresh_token"):
+                        self._oauth.refresh_access_token(token_info["refresh_token"])
+                        # El nuevo access_token queda guardado en el cache por spotipy.
+                        # auth_manager lo usará automáticamente en el reintento.
+                        logger.info("✅ Token renovado, reintentando comando...")
+                        return _dispatch()
+                except Exception as refresh_err:
+                    logger.error(f"❌ Refresh falló: {refresh_err}")
+                self._sp = None
+                return (
+                    "❌ Sesión de Spotify expirada. Re-autoriza visitando:\n"
+                    "👉 http://localhost:5000/spotify/auth"
+                )
+            raise
 
     # ─── Reproducción ─────────────────────────────────────────
 
@@ -494,15 +548,29 @@ class SpotifyClient:
         except Exception as e:
             logger.debug(f"No se pudo cargar contexto reciente de Spotify: {e}")
 
+    # Artículos y pronombres que NO son títulos de canciones solos
+    _ARTICLES_ES = frozenset([
+        'el', 'la', 'los', 'las', 'un', 'una', 'unos', 'unas',
+        'ese', 'esa', 'eso', 'esos', 'esas',
+        'este', 'esta', 'esto', 'estos', 'estas',
+        'aquel', 'aquella', 'aquello',
+    ])
+
     def _parse_artist_hint(self, query: str) -> tuple[str, str | None]:
         """
         Detecta si el query incluye artista explícito.
         'el malo de aventura' → ('el malo', 'aventura')
+        'el de la codeína'    → ('el de la codeína', None)  ← NO split ("el" es artículo solo)
         'mojabi ghost'        → ('mojabi ghost', None)
         """
         m = self._DE_ARTIST_RE.match(query)
         if m:
-            return m.group(1).strip(), m.group(2).strip()
+            song_part = m.group(1).strip()
+            artist_part = m.group(2).strip()
+            # No dividir si la parte de canción es solo un artículo/pronombre solo
+            # Ej: "el de la codeína" → song="el" es un artículo → NO dividir
+            if song_part.lower() not in self._ARTICLES_ES and len(song_part) >= 3:
+                return song_part, artist_part
         return query, None
 
     # Regex para limpiar prefijos de playlist del query

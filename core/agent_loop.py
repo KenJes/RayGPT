@@ -85,6 +85,28 @@ Responde SIEMPRE con un JSON válido con esta estructura exacta:
     `spotify_devices`. Cuando el usuario pida música, úsalas. Para reproducir, usa `spotify_play`
     con `query` = nombre de canción/artista/album. Si dice "pause", "para", "detén", usa `spotify_pause`.
     Si dice "siguiente", usa `spotify_next`. Si dice "qué suena", usa `spotify_current`.
+18. Si el usuario pide contenido puramente textual como explicaciones, tutoriales, prácticas guiadas,
+    brainstorming, planes, ejemplos o redacción, responde con `call_api` o con `"tool": "none"`.
+    NO uses herramientas de creación de archivos salvo que el usuario pida explícitamente crear,
+    guardar, exportar o entregar un archivo, notebook o entregable.
+19. Cuando uses `create_document`, `create_presentation` o `create_spreadsheet`, el argumento principal
+    esperado es `tema` y el opcional es `detalles`.
+    Si el usuario pide `excel`, `xlsx`, `sheet` o `google sheet`, usa `create_spreadsheet`.
+    Si pide `documento`, `docx`, `word` o `google docs`, usa `create_document`.
+    Si pide `slides`, `ppt`, `pptx` o `powerpoint`, usa `create_presentation`.
+20. Para notebooks locales usa `create_notebook`. Para archivos locales de texto como html, css,
+    js, ts, py, php, json, md, txt, xml, yaml, yml, sql o csv usa `create_local_artifact`.
+    `create_local_artifact` también puede crear varios archivos relacionados en una sola llamada con
+    `files` = lista de especificaciones de archivo. Usa `open_local_artifact` solo si el usuario pidió
+    explícitamente abrir el recurso y solo en canales locales de escritorio.
+    Si el usuario pidió un archivo descargable o exportable, no respondas con tablas o instrucciones para
+    copiar y pegar manualmente; crea el recurso correspondiente para que el canal pueda exportarlo o adjuntarlo.
+    NO uses `write_file` para responder chats, tutoriales, notebooks, prácticas guiadas o ejemplos.
+    Solo úsalo como fallback si el usuario pide explícitamente guardar un archivo local y no existe
+    una herramienta especializada que aplique.
+21. Nunca inventes enlaces, IDs, nombres de archivo, documentos creados ni acciones completadas.
+    Solo menciona URLs o recursos externos si una herramienta los devolvió realmente en `Output`.
+    Si no se creó ningún recurso, entrega el contenido completo directamente en `message_to_user`.
 
 ### CONTEXTO PREVIO (RAG)
 
@@ -100,6 +122,46 @@ Resultado del paso {step}:
 
 Continúa con el siguiente paso. Responde con JSON:
 """
+
+_FILE_REQUEST_INTENT_PATTERNS = (
+    r"\b(crea(?:r)?|genera(?:r)?|haz(?:me|lo|la)?|hacer|guarda(?:r)?|exporta(?:r)?|escribe(?:r)?|arma(?:r)?|prepara(?:r)?|construye(?:r)?|dame|entr[eé]ga(?:me|r)?)\b",
+)
+
+_FILE_OPEN_INTENT_PATTERNS = (
+    r"\b(abre(?:lo|la|me)?|abrir|open|muestra(?:me|r)?|visualiza(?:r)?|lanza(?:r)?)\b",
+)
+
+_LOCAL_OPEN_CHANNELS = {"desktop", "desktop_gui", "local"}
+
+_FILE_CREATION_TOOL_PATTERNS = {
+    "create_document": (
+        r"\b(documento|google docs|doc|docs)\b",
+    ),
+    "create_presentation": (
+        r"\b(presentaci[oó]n|diapositivas|slides|powerpoint|pptx)\b",
+    ),
+    "create_spreadsheet": (
+        r"\b(hoja de c[aá]lculo|spreadsheet|excel|xlsx|sheet)\b",
+    ),
+    "create_notebook": (
+        r"\b(ipynb|jupyter|notebook|colab|cuaderno)\b",
+    ),
+    "create_local_artifact": (
+        r"\b(archivo|fichero|script|plantilla|landing page|p[aá]gina web|sitio web)\b",
+        r"\.(?:html|css|js|ts|py|php|json|md|txt|xml|yaml|yml|sql|csv)\b",
+        r"\b(html|css|javascript|js|typescript|ts|php|json|markdown|md|xml|yaml|yml|sql|csv)\b",
+        r"\b(?:en|como)\s+(?:python|py)\b",
+    ),
+    "write_file": (
+        r"\b(archivo|fichero|script|plantilla|notebook|ipynb|jupyter)\b",
+        r"\.(?:html|css|js|ts|py|php|json|md|txt|xml|yaml|yml|sql|csv|ipynb)\b",
+    ),
+    "open_local_artifact": (
+        r"\b(archivo|fichero|script|plantilla|notebook|ipynb|jupyter|landing page|p[aá]gina web|sitio web)\b",
+        r"\.(?:html|css|js|ts|py|php|json|md|txt|xml|yaml|yml|sql|csv|ipynb)\b",
+        r"\b(html|css|javascript|js|typescript|ts|python|py|php|json|markdown|md|xml|yaml|yml|sql|csv)\b",
+    ),
+}
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -137,6 +199,7 @@ class AgentLoop:
         goal: str,
         user_name: str | None = None,
         user_id: str | None = None,
+        channel: str | None = None,
         tono_override: str | None = None,
         usuario_agresivo: bool = False,
         conversation_history: list[dict] | None = None,
@@ -193,12 +256,13 @@ class AgentLoop:
         messages = [
             {"role": "system", "content": system_prompt},
         ]
-        # Inyectar historial de conversación previo para contexto
+        # Inyectar historial de conversación previo: 8 msgs = ~4 turnos de contexto
         if conversation_history:
-            messages.extend(conversation_history)
+            messages.extend(conversation_history[-8:])
         messages.append({"role": "user", "content": f"Meta: {goal}"})
 
         actions_log = []
+        artifacts = []
         step = 0
 
         while step < self.MAX_STEPS:
@@ -210,36 +274,31 @@ class AgentLoop:
             parsed = self._parse_agent_response(raw_response)
 
             if parsed is None:
-                # LLM no devolvió JSON válido → tratar como respuesta directa
+                # LLM no devolvió JSON válido → rescatar mensaje visible si existe
+                recovered_message = self._extract_message_to_user(raw_response)
+                final_response = recovered_message or raw_response
                 self.logger.log_step(
                     run_id, step, "parse_error", {},
                     start_ts, AgentLogger._now_iso(),
-                    "error", output_summary=raw_response[:300],
+                    "error", output_summary=final_response[:300],
                     error="No se pudo parsear JSON del LLM",
                 )
-                # Devolver la respuesta raw como respuesta final
-                self.logger.log_final(run_id, step, "ok", raw_response[:300])
+                self.logger.log_final(run_id, step, "ok", final_response[:300])
                 return {
                     "success": True,
-                    "response": raw_response,
+                    "response": final_response,
                     "steps_taken": step,
                     "run_id": run_id,
                     "actions_log": actions_log,
+                    "artifacts": artifacts,
                 }
 
             # Log plan en el primer paso
             if step == 1:
                 self.logger.log_plan(run_id, goal, parsed.get("plan", []))
 
-            # 5. Notificar progreso al usuario
+            # 5. Verificar si el agente quiere parar
             msg_user = parsed.get("message_to_user", "")
-            if msg_user and self.on_progress:
-                try:
-                    self.on_progress(msg_user)
-                except Exception:
-                    pass
-
-            # 6. Verificar si el agente quiere parar
             if parsed.get("stop", False):
                 final_msg = parsed.get("message_to_user", "Listo.")
                 self.logger.log_step(
@@ -261,12 +320,37 @@ class AgentLoop:
                     "steps_taken": step,
                     "run_id": run_id,
                     "actions_log": actions_log,
+                    "artifacts": artifacts,
                 }
 
-            # 7. Ejecutar la acción
+            # 6. Preparar la acción
             next_action = parsed.get("next_action", {})
             tool_name = next_action.get("tool", "none")
             tool_args = next_action.get("args", {})
+
+            if (tool_name == "none" or not tool_name) and str(msg_user).strip():
+                final_msg = str(msg_user).strip()
+                self.logger.log_step(
+                    run_id, step, "handoff", {},
+                    start_ts, AgentLogger._now_iso(),
+                    "ok", output_summary=final_msg[:300],
+                )
+                self.logger.log_final(run_id, step, "awaiting_user", final_msg[:300])
+                return {
+                    "success": True,
+                    "response": final_msg,
+                    "steps_taken": step,
+                    "run_id": run_id,
+                    "actions_log": actions_log,
+                    "artifacts": artifacts,
+                }
+
+            # 7. Notificar progreso al usuario solo si el loop seguirá trabajando
+            if msg_user and self.on_progress:
+                try:
+                    self.on_progress(msg_user)
+                except Exception:
+                    pass
 
             if tool_name == "none" or not tool_name:
                 # Sin herramienta → agregar observación vacía y continuar
@@ -307,6 +391,30 @@ class AgentLoop:
                 })
                 continue
 
+            allowed, block_reason = self._can_execute_tool_for_goal(goal, tool_name, channel=channel)
+            if not allowed:
+                messages.append({"role": "assistant", "content": raw_response})
+                messages.append({
+                    "role": "user",
+                    "content": _OBSERVATION_TEMPLATE.format(
+                        step=step,
+                        tool=tool_name,
+                        success=False,
+                        output="",
+                        error=block_reason,
+                    ),
+                })
+                self.logger.log_step(
+                    run_id, step, tool_name, tool_args,
+                    start_ts, AgentLogger._now_iso(),
+                    "error", error=block_reason,
+                )
+                actions_log.append({
+                    "step": step, "tool": tool_name, "success": False,
+                    "output": "", "error": block_reason,
+                })
+                continue
+
             # 8. Verificar aprobación si es necesario
             if adapter.requires_approval:
                 req = self.approval.request_approval(
@@ -342,6 +450,13 @@ class AgentLoop:
                 result = adapter.execute(tool_args)
             except Exception as e:
                 result = {"success": False, "output": None, "error": str(e)}
+
+            result_artifacts = [
+                dict(item)
+                for item in (result.get("artifacts") or [])
+                if isinstance(item, dict) and self._artifact_identity(item)
+            ]
+            artifacts = self._merge_artifacts(artifacts, result_artifacts)
 
             end_ts = AgentLogger._now_iso()
 
@@ -381,6 +496,7 @@ class AgentLoop:
                 "success": result["success"],
                 "output": str(result.get("output", ""))[:300],
                 "error": result.get("error"),
+                "artifacts": result_artifacts,
             })
 
         # Si llegamos aquí, agotamos los pasos
@@ -396,23 +512,87 @@ class AgentLoop:
             "steps_taken": step,
             "run_id": run_id,
             "actions_log": actions_log,
+            "artifacts": artifacts,
         }
 
     # ─── Helpers ──────────────────────────────────────────────
 
+    def _can_execute_tool_for_goal(self, goal: str, tool_name: str, channel: str | None = None) -> tuple[bool, str | None]:
+        if tool_name not in _FILE_CREATION_TOOL_PATTERNS:
+            return True, None
+        normalized_channel = str(channel or "").strip().lower()
+        if tool_name == "open_local_artifact" and normalized_channel not in _LOCAL_OPEN_CHANNELS:
+            return False, "La apertura automática de archivos solo se permite en canales locales de escritorio."
+        if self._goal_explicitly_requests_tool(goal, tool_name):
+            return True, None
+        return (
+            False,
+            (
+                f"La meta no pidió explícitamente crear o guardar un recurso con '{tool_name}'. "
+                "Entrega el contenido directamente o espera una solicitud explícita de archivo."
+            ),
+        )
+
+    def _goal_explicitly_requests_tool(self, goal: str, tool_name: str) -> bool:
+        normalized_goal = str(goal or "").lower()
+        if not normalized_goal:
+            return False
+
+        intent_patterns = _FILE_OPEN_INTENT_PATTERNS if tool_name == "open_local_artifact" else _FILE_REQUEST_INTENT_PATTERNS
+        has_creation_intent = any(
+            re.search(pattern, normalized_goal, re.IGNORECASE)
+            for pattern in intent_patterns
+        )
+        if not has_creation_intent:
+            return False
+
+        return any(
+            re.search(pattern, normalized_goal, re.IGNORECASE)
+            for pattern in _FILE_CREATION_TOOL_PATTERNS.get(tool_name, ())
+        )
+
+    def _merge_artifacts(self, current: list[dict], new_items: list[dict]) -> list[dict]:
+        merged = [dict(item) for item in current if isinstance(item, dict)]
+        seen_ids = {self._artifact_identity(item) for item in merged if self._artifact_identity(item)}
+        for artifact in new_items:
+            identity = self._artifact_identity(artifact)
+            if identity and identity not in seen_ids:
+                merged.append(dict(artifact))
+                seen_ids.add(identity)
+        return merged
+
+    def _artifact_identity(self, artifact: dict) -> str | None:
+        for key in ("path", "google_id", "google_url"):
+            value = artifact.get(key)
+            if value:
+                return str(value)
+        provider = artifact.get("provider")
+        artifact_type = artifact.get("tipo") or artifact.get("kind")
+        title = artifact.get("title")
+        if provider and artifact_type and title:
+            return f"{provider}:{artifact_type}:{title}"
+        return None
+
     def _call_llm(self, messages: list[dict]) -> str:
         """Llama al LLM con la cadena de mensajes y devuelve la respuesta raw.
+        Comprime el historial antes de enviar para evitar overflow 413/contexto enorme.
         Si la respuesta es un rechazo por filtros de seguridad, reintenta
         con un prompt simplificado (sin historial agresivo)."""
         from core.tools import es_rechazo_llm
+        from core.ai_clients import EdgeRouter
+        # Comprimir a 10k chars — suficiente para plan+JSON de cada paso
+        # Mantener bajo para no agotar RPM de Groq (30 RPM) ni Mistral (1 RPM free)
+        compressed = EdgeRouter.compress_messages(messages, max_chars=10000)
         try:
-            response = self.ai_chat(messages, 0.4, 2000)
+            # max_tokens=800: el JSON de plan/acción rara vez supera 600 tokens.
+            # Bajar este valor reduce consumo de RPM en todos los modelos.
+            response = self.ai_chat(compressed, 0.4, 800)
             if response and not es_rechazo_llm(response):
                 return response
             # Rechazo detectado — reintentar sin historial de conversación
-            simplified = [m for m in messages if m["role"] in ("system", "user")]
-            if len(simplified) < len(messages):
-                response2 = self.ai_chat(simplified, 0.4, 2000)
+            simplified = [m for m in compressed if m["role"] in ("system", "user")]
+            if len(simplified) < len(compressed):
+                response2 = self.ai_chat(simplified, 0.4, 800)
                 if response2 and not es_rechazo_llm(response2):
                     return response2
             return response or ""
@@ -422,30 +602,72 @@ class AgentLoop:
     def _parse_agent_response(self, raw: str) -> dict | None:
         """
         Intenta extraer JSON estructurado de la respuesta del LLM.
-        Busca el primer bloque JSON { ... } en la respuesta.
+        Soporta respuestas con uno o varios objetos JSON concatenados.
         """
         if not raw:
             return None
+
+        def _scan_dicts(text: str) -> list[dict]:
+            decoder = json.JSONDecoder()
+            found: list[dict] = []
+            idx = 0
+            while idx < len(text):
+                start = text.find("{", idx)
+                if start == -1:
+                    break
+                try:
+                    parsed, end = decoder.raw_decode(text[start:])
+                except json.JSONDecodeError:
+                    idx = start + 1
+                    continue
+                if isinstance(parsed, dict):
+                    found.append(parsed)
+                idx = start + end
+            return found
+
         # 1. Intentar parsear toda la respuesta como JSON
         try:
             return json.loads(raw)
         except json.JSONDecodeError:
             pass
-        # 2. Buscar bloques ```json ... ``` o { ... }
-        code_block = re.search(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", raw)
+
+        # 2. Buscar bloques ```json ... ``` y escanear múltiples objetos.
+        code_block = re.search(r"```(?:json)?\s*([\s\S]*?)\s*```", raw)
         if code_block:
-            try:
-                return json.loads(code_block.group(1))
-            except json.JSONDecodeError:
-                pass
-        # 3. Buscar primer { ... } balanceado
-        json_match = re.search(r"\{[\s\S]*\}", raw)
-        if json_match:
-            try:
-                return json.loads(json_match.group(0))
-            except json.JSONDecodeError:
-                pass
+            candidates = _scan_dicts(code_block.group(1))
+            if candidates:
+                return candidates[-1]
+
+        # 3. Escanear todo el texto y tomar el último objeto válido.
+        candidates = _scan_dicts(raw)
+        if candidates:
+            return candidates[-1]
+
         return None
+
+    def _extract_message_to_user(self, raw: str) -> str | None:
+        """Extrae `message_to_user` incluso si el JSON está malformado."""
+        if not raw:
+            return None
+
+        match = re.search(
+            r'"message_to_user"\s*:\s*"((?:\\.|[^"\\])*)"',
+            raw,
+            re.DOTALL,
+        )
+        if not match:
+            return None
+
+        encoded = f'"{match.group(1)}"'
+        try:
+            return json.loads(encoded)
+        except json.JSONDecodeError:
+            return (
+                match.group(1)
+                .replace(r'\n', '\n')
+                .replace(r'\"', '"')
+                .replace(r'\\', '\\')
+            )
 
     def _format_tools_description(self) -> str:
         """Formatea las herramientas disponibles para el system prompt."""

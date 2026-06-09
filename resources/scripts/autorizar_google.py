@@ -7,7 +7,7 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 
-# Alcances necesarios
+# Alcances necesarios (deben coincidir EXACTAMENTE con GoogleWorkspaceClient.SCOPES)
 SCOPES = [
     'https://www.googleapis.com/auth/presentations',
     'https://www.googleapis.com/auth/documents',
@@ -16,6 +16,8 @@ SCOPES = [
     'https://www.googleapis.com/auth/drive',
     'https://www.googleapis.com/auth/calendar',
     'https://www.googleapis.com/auth/youtube.readonly',
+    'https://www.googleapis.com/auth/gmail.readonly',
+    'https://www.googleapis.com/auth/gmail.send',
 ]
 
 def main():
@@ -25,10 +27,13 @@ def main():
     print()
     
     creds = None
-    # Rutas en resources/data/
-    data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data')
-    token_file = os.path.join(data_dir, 'token.json')
-    oauth_file = os.path.join(data_dir, 'oauth-credentials.json')
+    # token.json va en data/ (raíz del proyecto) — es donde GoogleWorkspaceClient lo busca.
+    # oauth-credentials.json vive en resources/data/ (no se mueve).
+    _script_dir      = os.path.dirname(os.path.abspath(__file__))   # resources/scripts/
+    _resources_dir   = os.path.dirname(_script_dir)                  # resources/
+    _project_root    = os.path.dirname(_resources_dir)               # Agentes/
+    token_file       = os.path.join(_project_root, 'data', 'token.json')
+    oauth_file       = os.path.join(_resources_dir, 'data', 'oauth-credentials.json')
     
     # Verificar si ya existe el token
     if os.path.exists(token_file):
@@ -85,6 +90,7 @@ def main():
         print()
         print("✅ Raymundo ya puede crear presentaciones, documentos y hojas de cálculo")
         print("✅ Raymundo ya puede crear y leer eventos de Google Calendar")
+        print("✅ Raymundo ya puede leer y enviar correos de Gmail")
         print("✅ Raymundo ya puede buscar videos en YouTube")
         print("✅ No necesitas volver a autorizar (el token se renueva automáticamente)")
         print()

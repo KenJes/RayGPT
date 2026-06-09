@@ -13,11 +13,11 @@ Versión: 1.0
 import os
 import wave
 import tempfile
-import subprocess
+
 import threading
 from pathlib import Path
 from typing import Optional, Tuple
-import numpy as np
+
 
 try:
     import piper
@@ -326,7 +326,7 @@ class AudioHandler:
             # Cargar modelo base (balance entre velocidad y precisión)
             # Opciones: tiny, base, small, medium, large
             print("⏳ Cargando modelo Whisper (puede tardar la primera vez)...")
-            self.whisper_model = whisper.load_model("base")
+            self.whisper_model = whisper.load_model("small")
             print("✅ Whisper STT inicializado")
         except Exception as e:
             print(f"⚠️ Error inicializando Whisper: {e}")

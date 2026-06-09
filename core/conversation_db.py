@@ -25,7 +25,7 @@ from typing import Callable
 _DEFAULT_DB_PATH = Path(__file__).resolve().parent.parent / "data" / "conversaciones.db"
 
 # Cuántos pares (user+assistant) recientes se envían completos al LLM
-RECENT_PAIRS = 8   # 16 mensajes = contexto manejable sin sobrecargar el LLM
+RECENT_PAIRS = 4   # 8 mensajes = contexto manejable sin sobrecargar el LLM
 
 # Cuántos mensajes viejos se resumen para dar contexto largo
 SUMMARY_WINDOW = 60  # mensajes antiguos a considerar para resumen

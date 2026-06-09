@@ -6,12 +6,12 @@ Verifica que TTS y STT funcionen correctamente
 import sys
 from pathlib import Path
 
-# Agregar path de core
+# Agregar raíz del proyecto al path
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
-CORE_DIR = BASE_DIR / "resources" / "core"
-sys.path.insert(0, str(CORE_DIR))
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
 
-from audio_handler import get_audio_handler
+from core.audio_handler import get_audio_handler
 
 def test_audio():
     print("\n" + "="*60)

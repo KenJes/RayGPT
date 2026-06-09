@@ -7,6 +7,10 @@ echo.
 echo Abriendo servidor Flask y bot de WhatsApp...
 echo.
 
+REM Evitar que tokens GitHub heredados bloqueen gh auth login / Copilot CLI
+set GITHUB_TOKEN=
+set GH_TOKEN=
+
 REM Abrir servidor Python en una nueva ventana (con venv activado)
 start "Servidor Flask" cmd /k "call .venv\Scripts\activate.bat && python whatsapp_server.py"
 

@@ -70,6 +70,10 @@ echo    ⚠️  NO CIERRES LAS VENTANAS
 echo.
 timeout /t 3 >nul
 
+REM Evitar que tokens GitHub heredados bloqueen gh auth login / Copilot CLI
+set GITHUB_TOKEN=
+set GH_TOKEN=
+
 REM Iniciar servidor Python en nueva ventana
 start "rAImundoGPT - Servidor Python" cmd /k "color 0B && python whatsapp_server.py"
 

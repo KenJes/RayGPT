@@ -8,8 +8,25 @@ echo Personalidad: Agente profesional de Axoloit
 echo Tono: Amable, competente, directo
 echo.
 
+REM Evitar que tokens GitHub heredados bloqueen gh auth login / Copilot CLI
+set GITHUB_TOKEN=
+set GH_TOKEN=
+
+REM Cerrar servidor Flask anterior si existe
+echo Cerrando servidor Flask anterior...
+taskkill /FI "WINDOWTITLE eq Servidor Flask*" /F >NUL 2>&1
+timeout /t 2 /nobreak >nul
+
 REM Establecer personalidad RAYMUNDO
 set PERSONALITY_MODE=raymundo
+
+REM Iniciar Ollama en segundo plano si no está corriendo
+tasklist /FI "IMAGENAME eq ollama.exe" 2>NUL | find /I "ollama.exe" >NUL
+if %ERRORLEVEL% NEQ 0 (
+    echo Iniciando Ollama en segundo plano...
+    start "" /min ollama serve
+    timeout /t 4 /nobreak >nul
+)
 
 REM Abrir servidor Python en una nueva ventana
 start "Servidor Flask - Raymundo" cmd /k "call .venv\Scripts\activate.bat && set PERSONALITY_MODE=raymundo && python whatsapp_server.py"

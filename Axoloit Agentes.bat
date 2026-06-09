@@ -4,6 +4,10 @@ title Axoloit Agents
 
 cd /d "%~dp0"
 
+REM Evitar que tokens GitHub heredados bloqueen gh auth login / Copilot CLI
+set GITHUB_TOKEN=
+set GH_TOKEN=
+
 if not exist ".venv\Scripts\python.exe" (
     echo [ERROR] No se encontro el entorno virtual .venv
     echo         Ejecuta primero: python -m venv .venv

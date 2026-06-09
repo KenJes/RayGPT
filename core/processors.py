@@ -146,7 +146,7 @@ class VisionProcessor:
         w, h = img.size
         if w < 1000:
             scale = 1000 / w
-            img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+            img = img.resize((int(w * scale), int(h * scale)), Image.Resampling.LANCZOS)
 
         # Aumentar contraste
         enhancer = ImageEnhance.Contrast(img)

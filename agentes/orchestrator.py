@@ -117,12 +117,13 @@ def _detectar_intencion_agente(mensaje: str) -> tuple[str, str, dict]:
         "presentación", "presentacion", "slides", "diapositivas", "ppt",
         "documento", "doc ", "redacta", "informe", "reporte",
         "hoja de cálculo", "spreadsheet", "tracker", "tabla de seguimiento",
-        "crea un sheet", "crea una hoja",
+        "crea un sheet", "crea una hoja", "sheet", "excel", "xlsx",
+        "google sheet", "google sheets",
     ]):
         if any(kw in msg for kw in ["presentación", "presentacion", "slides", "diapositivas"]):
             return "google", "crear_presentacion", {"tema": mensaje}
 
-        if any(kw in msg for kw in ["hoja", "spreadsheet", "tracker", "sheet"]):
+        if any(kw in msg for kw in ["hoja", "spreadsheet", "tracker", "sheet", "excel", "xlsx", "google sheet", "google sheets"]):
             tipo = "municipios" if "municipio" in msg else "general"
             return "google", "crear_tracker", {"nombre": mensaje[:60], "tipo": tipo}
 

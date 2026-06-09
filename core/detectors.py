@@ -9,6 +9,12 @@ import unicodedata
 class DetectorIntenciones:
     """Detecta qué quiere hacer el usuario."""
 
+    SPREADSHEET_PRIORITY_TERMS = [
+        "excel", "xlsx", "spreadsheet", "sheet",
+        "google sheet", "google sheets",
+        "hoja de cálculo", "hoja de calculo",
+    ]
+
     KEYWORDS_PRESENTACION = [
         "presentación", "presentacion", "slides", "diapositivas",
         "ppt", "powerpoint", "exponer", "exposición", "exposicion",
@@ -29,8 +35,11 @@ class DetectorIntenciones:
 
     KEYWORDS_HOJA_CALCULO = [
         "hoja de cálculo", "hoja de calculo", "spreadsheet", "excel",
+        "sheet", "google sheet", "google sheets",
         "tabla de datos", "tabla", "datos", "xlsx",
         "crea una hoja", "genera una hoja", "haz una hoja",
+        "hazme un excel", "haz un excel", "crea un excel", "genera un excel",
+        "archivo excel", "en excel", "en xlsx",
         "hoja con datos", "registro de",
     ]
 
@@ -38,6 +47,20 @@ class DetectorIntenciones:
         "imagen", "imágenes", "imagenes", "foto", "fotos",
         "analiza imagen", "analiza la imagen", "qué hay en la imagen",
         "describe imagen", "describe la imagen", "lee la imagen",
+    ]
+
+    KEYWORDS_RECONOCIMIENTO_FACIAL = [
+        "rostro", "cara", "facial", "reconoce", "reconocer",
+        "identifica", "identificar", "quién es", "quien es",
+        "qué edad tiene", "que edad tiene", "cuántos años tiene", "cuantos años tiene",
+        "emoción facial", "emocion facial", "expresión facial", "expresion facial",
+        "verificar identidad", "verificar rostro", "misma persona",
+        "registrar rostro", "registrar cara", "guardar rostro",
+        "es real", "es falsa", "anti spoofing", "spoofing",
+        "reconocimiento facial", "face recognition",
+        "analiza el rostro", "analiza la cara", "analiza su cara",
+        "analiza mi cara", "analiza mi rostro", "analizar cara",
+        "quién está", "quien esta", "quién aparece", "quien aparece",
     ]
 
     KEYWORDS_DOCUMENTOS_ANALISIS = [
@@ -49,7 +72,7 @@ class DetectorIntenciones:
 
     KEYWORDS_WEB_SCRAPING = [
         "qué es", "que es", "información sobre", "informacion sobre",
-        "busca", "investiga", "dime sobre", "cuéntame de", "cuentame de",
+        "busca ", "buscar ", "investiga ", "dime sobre", "cuéntame de", "cuentame de",
         ".com", ".mx", ".org", ".net", "http", "www", "página", "pagina",
         "sitio web", "website",
     ]
@@ -60,16 +83,16 @@ class DetectorIntenciones:
         "cita", "citas", "reunion", "reunión", "junta", "juntas",
         "evento", "eventos", "recordatorio", "recordatorios",
         "recordar", "recuerda", "recuérdame", "recuerdame",
-        "programa", "programar", "calendariza",
+        "programa una", "programa el", "programar reunión", "programar cita", "calendariza",
         "apunta", "apúntame", "apuntame", "anota", "anótame", "anotame",
-        "agrega", "agregar", "añade", "añadir", "crea un", "crear un",
-        "pon ", "poneme", "pónme", "guarda", "guárdame", "guardame",
-        "avísame", "avisame", "alerta", "alarma", "notifícame", "notificame",
+        "añade al", "añadir al", "crea un evento", "crea una cita", "crear un evento",
+        "guarda en agenda", "guárdame en", "guardame en",
+        "avísame", "avisame", "notifícame", "notificame",
         "no me olvides", "no se me olvide", "no olvidar",
         "tengo que ir a", "tengo que hacer",
         "voy a ir", "iremos", "saldremos", "estaremos",
-        "compromiso", "una llamada", "la llamada", "agendar llamada", "videollamada", "videoconferencia",
-        "actividad", "tarea para",
+        "compromiso", "agendar llamada", "videollamada", "videoconferencia",
+        "tarea para",
         # Ver la agenda
         "mi agenda", "mis eventos", "mis citas",
         "qué tengo", "que tengo", "cuándo tengo", "cuando tengo",
@@ -94,6 +117,98 @@ class DetectorIntenciones:
         "videos de", "video de", "quiero ver un video",
     ]
 
+    KEYWORDS_CLIMA = [
+        "clima", "temperatura", "lluvia", "lluvioso", "llover",
+        "hace calor", "hace frío", "hace frio", "qué tiempo hace", "que tiempo hace",
+        "cómo está el clima", "como esta el clima", "cómo va el clima", "como va el clima",
+        "pronóstico", "pronostico", "weather", "forecast",
+        "va a llover", "va a hacer", "hay viento", "está nublado", "esta nublado",
+        "qué clima hay", "que clima hay", "humedad", "cómo amanece", "como amanece",
+        "grados celsius", "grados fahrenheit",
+        "temperatura en", "clima en", "tiempo en", "llueve en",
+        "qué temperatura", "que temperatura", "cuántos grados", "cuantos grados",
+        "cómo está afuera", "como esta afuera", "necesito abrigo", "voy a necesitar paraguas",
+    ]
+
+    KEYWORDS_CORREO = [
+        "correo", "correos", "email", "emails", "mail", "mails",
+        "bandeja", "inbox", "mensajes nuevos", "mensajes de correo",
+        "leer correo", "leer mis correos", "revisar correo", "revisar mis correos",
+        "tengo correos", "mis correos", "mis emails", "ver correos",
+        "correos nuevos", "correos sin leer", "nuevos correos",
+        "enviar correo", "enviar un correo", "envía un correo", "envia un correo",
+        "mandar correo", "mandar un correo", "manda un correo", "manda un email",
+        "manda correo", "mándame correo", "mandame correo",
+        "manda un mail", "mandar un email", "manda un correo",
+        "envíale un correo", "enviame un correo", "enviame un email",
+        "escribir correo", "redactar correo", "escribir un email",
+        "qué correos tengo", "que correos tengo", "hay correos nuevos",
+        "por gmail", "en gmail", "en mi gmail",
+    ]
+
+    KEYWORDS_CRYPTO = [
+        "bitcoin", "ethereum", "solana", "dogecoin", "cardano",
+        "btc", "eth", "sol", "doge", "bnb", "xrp", "ripple",
+        "litecoin", "avalanche", "avax", "chainlink", "polygon",
+        "criptomoneda", "criptomonedas", "cripto", "crypto",
+        "precio de bitcoin", "precio de ethereum",
+        "cuánto vale bitcoin", "cuanto vale bitcoin",
+        "cuánto vale el", "cuanto vale el",
+        "cuánto cuesta bitcoin", "cuanto cuesta bitcoin",
+        "top cripto", "ranking cripto", "mejores criptos",
+        "mercado crypto", "crypto market", "precio de",
+        "moneda digital", "monedas digitales", "defi", "altcoin",
+        "cómo está bitcoin", "como esta bitcoin",
+        "pepe coin", "shiba", "tron",
+    ]
+
+    KEYWORDS_GENERAR_IMAGEN = [
+        "genera una imagen", "genera imagen", "crea una imagen",
+        "hazme una imagen", "hazme un dibujo", "genera un dibujo",
+        "genera una foto", "crea una foto", "crea arte",
+        "genera arte", "dibuja", "ilustra", "visualiza",
+        "imagínate", "imaginate", "genera con ia",
+        "imagen de", "imagen con ia", "imagen artificial",
+        "foto con ia", "generar imagen", "crear imagen",
+        "imagen ia", "imagen ai", "arte ia", "arte ai",
+        "pollinations", "render", "imagen 3d",
+    ]
+
+    KEYWORDS_QR = [
+        "código qr", "codigo qr", "genera qr", "crear qr",
+        "crea qr", "crea un qr", "genera un qr",
+        "qr de", "qr para", "qr code", "qr del enlace",
+        "genera un código qr", "genera un codigo qr",
+        "código de barras", "codigo de barras",
+        "qr de mi", "qr para mi",
+    ]
+
+    KEYWORDS_NASA = [
+        "nasa", "foto del espacio", "foto astronómica", "foto astronomica",
+        "foto del día nasa", "foto del dia nasa",
+        "foto del dia", "foto del día",
+        "foto de la nasa", "imagen de la nasa",
+        "foto astronomica del dia", "foto astronomica del día",
+        "muéstrame la foto", "muestrame la foto",
+        "imagen del espacio", "imagen del universo",
+        "asteroide", "asteroides", "objeto cercano",
+        "estación espacial", "estacion espacial", "iss",
+        "telescopio hubble", "james webb",
+        "foto nasa", "imagen nasa", "apod",
+        "algo peligroso en el espacio", "peligro asteroide",
+        "foto astronomica", "foto del cosmos", "imagen del cosmos",
+    ]
+
+    KEYWORDS_COMFYUI = [
+        "comfyui", "comfy ui", "comfy",
+        "stable diffusion", "genera con comfyui",
+        "genera con stable diffusion",
+        "sdxl", "sd imagen",
+        "imagen con comfyui", "imagen con stable diffusion",
+        "usa comfyui", "usa stable diffusion",
+        "generar con comfyui", "generame con comfyui",
+    ]
+
     @staticmethod
     def _strip_accents(text):
         nfkd = unicodedata.normalize("NFKD", text)
@@ -106,13 +221,23 @@ class DetectorIntenciones:
             "documento": self._contar_keywords(mensaje_lower, self.KEYWORDS_DOCUMENTO),
             "hoja_calculo": self._contar_keywords(mensaje_lower, self.KEYWORDS_HOJA_CALCULO),
             "imagenes": self._contar_keywords(mensaje_lower, self.KEYWORDS_IMAGENES),
+            "reconocimiento_facial": self._contar_keywords(mensaje_lower, self.KEYWORDS_RECONOCIMIENTO_FACIAL),
             "analisis_documento": self._contar_keywords(mensaje_lower, self.KEYWORDS_DOCUMENTOS_ANALISIS),
             "web_scraping": self._contar_keywords(mensaje_lower, self.KEYWORDS_WEB_SCRAPING),
             "calendario": self._contar_keywords(mensaje_lower, self.KEYWORDS_CALENDARIO),
             "youtube": self._contar_keywords(mensaje_lower, self.KEYWORDS_YOUTUBE),
+            "clima": self._contar_keywords(mensaje_lower, self.KEYWORDS_CLIMA),
+            "correo": self._contar_keywords(mensaje_lower, self.KEYWORDS_CORREO),
+            "crypto": self._contar_keywords(mensaje_lower, self.KEYWORDS_CRYPTO),
+            "generar_imagen": self._contar_keywords(mensaje_lower, self.KEYWORDS_GENERAR_IMAGEN),
+            "qr": self._contar_keywords(mensaje_lower, self.KEYWORDS_QR),
+            "nasa": self._contar_keywords(mensaje_lower, self.KEYWORDS_NASA),
+            "comfyui": self._contar_keywords(mensaje_lower, self.KEYWORDS_COMFYUI),
         }
 
         intencion_principal = max(scores, key=scores.get)
+        if self._should_prioritize_spreadsheet(mensaje_lower, scores):
+            intencion_principal = "hoja_calculo"
         confianza = scores[intencion_principal] / 10.0
 
         if confianza < 0.25:
@@ -139,6 +264,17 @@ class DetectorIntenciones:
             if keyword_nfc in texto_nfc or keyword_sin_acentos in texto_sin_acentos:
                 count += 5 if " " in keyword else 2
         return count
+
+    def _should_prioritize_spreadsheet(self, texto, scores):
+        spreadsheet_score = scores.get("hoja_calculo", 0)
+        if spreadsheet_score <= 0:
+            return False
+
+        texto_sin_acentos = self._strip_accents(unicodedata.normalize("NFC", texto))
+        return any(
+            term in texto or self._strip_accents(term) in texto_sin_acentos
+            for term in self.SPREADSHEET_PRIORITY_TERMS
+        )
 
     def _extraer_tema(self, mensaje, intencion):
         patrones = [
